@@ -1,0 +1,33 @@
+# AWS Configuration
+aws_region = "ap-southeast-1"
+
+# Project Configuration
+project_name = "llmops-platform"
+environment  = "dev"
+
+# EKS Cluster Configuration
+cluster_name       = "llmops-cluster"
+kubernetes_version = "1.29"
+
+# Cluster Endpoint Access
+cluster_endpoint_private_access      = true
+cluster_endpoint_public_access       = true
+cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"] # Restrict this in production
+
+# System Node Group (for kube-system and addons)
+system_node_group_instance_types = ["t3.medium"]
+system_node_group_desired_size   = 2
+system_node_group_min_size       = 2
+system_node_group_max_size       = 4
+
+# Workload Node Group (for LiteLLM, Langfuse, etc.)
+workload_node_group_instance_types = ["t3.large"]
+workload_node_group_desired_size   = 2
+workload_node_group_min_size       = 2
+workload_node_group_max_size       = 6
+
+# Cluster Autoscaler
+enable_cluster_autoscaler = true
+
+# Control Plane Logging
+cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]

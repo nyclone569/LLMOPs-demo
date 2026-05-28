@@ -1,0 +1,22 @@
+formatter: "markdown table"
+
+version: ""
+
+header-from: README.md
+
+sections:
+  show:
+    - header
+    - requirements
+    - providers
+    - inputs
+    - outputs
+    - resources
+
+output:
+  file: "TERRAFORM_DOCS.md"
+  mode: replace
+
+sort:
+  enabled: true
+  by: required

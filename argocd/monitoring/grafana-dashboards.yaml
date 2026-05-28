@@ -1,0 +1,209 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llmops-grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  llmops-overview.json: |
+    {
+      "dashboard": {
+        "title": "LLMOps Platform Overview",
+        "tags": ["llmops", "overview"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "title": "LiteLLM Request Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(litellm_request_total[5m]))",
+                "legendFormat": "Requests/sec"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "LiteLLM Error Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(litellm_request_total{status=~\"5..\"}[5m])) / sum(rate(litellm_request_total[5m]))",
+                "legendFormat": "Error Rate"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "LiteLLM P95 Latency",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
+                "legendFormat": "P95 Latency"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Requests by Model",
+            "targets": [
+              {
+                "expr": "sum(rate(litellm_request_total[5m])) by (model)",
+                "legendFormat": "{{ model }}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Requests by Provider",
+            "targets": [
+              {
+                "expr": "sum(rate(litellm_request_total[5m])) by (provider)",
+                "legendFormat": "{{ provider }}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Provider Health",
+            "targets": [
+              {
+                "expr": "sum(rate(litellm_request_total{status=\"200\"}[5m])) by (provider) / sum(rate(litellm_request_total[5m])) by (provider)",
+                "legendFormat": "{{ provider }}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Daily Token Usage",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_tokens_total[24h]))",
+                "legendFormat": "Total Tokens"
+              }
+            ],
+            "type": "stat"
+          },
+          {
+            "title": "Daily Cost (USD)",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+                "legendFormat": "Total Cost"
+              }
+            ],
+            "type": "stat"
+          },
+          {
+            "title": "Open WebUI Availability",
+            "targets": [
+              {
+                "expr": "up{job=\"open-webui\"}",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "type": "stat"
+          },
+          {
+            "title": "Langfuse Availability",
+            "targets": [
+              {
+                "expr": "up{job=\"langfuse\"}",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "type": "stat"
+          },
+          {
+            "title": "Redis Memory Usage",
+            "targets": [
+              {
+                "expr": "redis_memory_used_bytes / redis_memory_max_bytes",
+                "legendFormat": "Memory Usage %"
+              }
+            ],
+            "type": "gauge"
+          },
+          {
+            "title": "Pod CPU Usage",
+            "targets": [
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"litellm|langfuse|open-webui\"}[5m])) by (namespace, pod)",
+                "legendFormat": "{{ namespace }}/{{ pod }}"
+              }
+            ],
+            "type": "graph"
+          }
+        ]
+      }
+    }
+
+  llmops-cost-analysis.json: |
+    {
+      "dashboard": {
+        "title": "LLMOps Cost Analysis",
+        "tags": ["llmops", "cost"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "title": "Cost by Model (24h)",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_total_cost_usd[24h])) by (model)",
+                "legendFormat": "{{ model }}"
+              }
+            ],
+            "type": "piechart"
+          },
+          {
+            "title": "Cost by User (24h)",
+            "targets": [
+              {
+                "expr": "topk(10, sum(increase(litellm_total_cost_usd[24h])) by (user))",
+                "legendFormat": "{{ user }}"
+              }
+            ],
+            "type": "bargraph"
+          },
+          {
+            "title": "Cost by Team (24h)",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_total_cost_usd[24h])) by (team)",
+                "legendFormat": "{{ team }}"
+              }
+            ],
+            "type": "piechart"
+          },
+          {
+            "title": "Token Usage by Model (24h)",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_tokens_total[24h])) by (model)",
+                "legendFormat": "{{ model }}"
+              }
+            ],
+            "type": "bargraph"
+          },
+          {
+            "title": "Cost Trend (7d)",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+                "legendFormat": "Daily Cost"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Budget Utilization",
+            "targets": [
+              {
+                "expr": "sum(increase(litellm_total_cost_usd[24h])) / 200",
+                "legendFormat": "% of $200 budget"
+              }
+            ],
+            "type": "gauge"
+          }
+        ]
+      }
+    }

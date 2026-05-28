@@ -1,0 +1,214 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llmops-prometheus-rules
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus-stack-prometheus
+    role: alert-rules
+data:
+  llmops-alerts.yaml: |
+    groups:
+      - name: llmops-platform
+        interval: 30s
+        rules:
+          # LiteLLM error rate alert
+          - alert: LiteLLMHighErrorRate
+            expr: |
+              (
+                sum(rate(litellm_request_total{status=~"5.."}[5m]))
+                /
+                sum(rate(litellm_request_total[5m]))
+              ) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+              component: litellm
+            annotations:
+              summary: "LiteLLM error rate above 5%"
+              description: "LiteLLM gateway has {{ $value | humanizePercentage }} error rate over the last 5 minutes."
+
+          # Provider timeout alert
+          - alert: LLMProviderHighTimeoutRate
+            expr: |
+              (
+                sum(rate(litellm_request_total{error_type="timeout"}[5m]))
+                /
+                sum(rate(litellm_request_total[5m]))
+              ) > 0.10
+            for: 5m
+            labels:
+              severity: warning
+              component: litellm
+            annotations:
+              summary: "LLM provider timeout rate above 10%"
+              description: "Provider timeout rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+          # Open WebUI unavailable
+          - alert: OpenWebUIDown
+            expr: up{job="open-webui"} == 0
+            for: 2m
+            labels:
+              severity: critical
+              component: open-webui
+            annotations:
+              summary: "Open WebUI is down"
+              description: "Open WebUI has been unavailable for more than 2 minutes."
+
+          # Langfuse unavailable
+          - alert: LangfuseDown
+            expr: up{job="langfuse"} == 0
+            for: 5m
+            labels:
+              severity: warning
+              component: langfuse
+            annotations:
+              summary: "Langfuse is down"
+              description: "Langfuse has been unavailable for more than 5 minutes. LLM tracing may be degraded."
+
+          # LiteLLM high latency
+          - alert: LiteLLMHighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le)
+              ) > 3
+            for: 10m
+            labels:
+              severity: warning
+              component: litellm
+            annotations:
+              summary: "LiteLLM P95 latency above 3 seconds"
+              description: "LiteLLM P95 latency is {{ $value }}s (excluding provider latency)."
+
+          # Redis high memory usage
+          - alert: RedisHighMemoryUsage
+            expr: |
+              (
+                redis_memory_used_bytes{job="redis"}
+                /
+                redis_memory_max_bytes{job="redis"}
+              ) > 0.80
+            for: 5m
+            labels:
+              severity: warning
+              component: redis
+            annotations:
+              summary: "Redis memory usage above 80%"
+              description: "Redis is using {{ $value | humanizePercentage }} of available memory."
+
+          # Redis connection issues
+          - alert: RedisHighConnectionCount
+            expr: redis_connected_clients{job="redis"} > 1000
+            for: 5m
+            labels:
+              severity: warning
+              component: redis
+            annotations:
+              summary: "Redis has high connection count"
+              description: "Redis has {{ $value }} connected clients."
+
+          # Pod restart alert
+          - alert: PodRestartingFrequently
+            expr: |
+              rate(kube_pod_container_status_restarts_total{namespace=~"litellm|langfuse|open-webui|redis"}[15m]) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} restarting frequently"
+              description: "Pod has restarted {{ $value }} times in the last 15 minutes."
+
+          # High CPU usage
+          - alert: PodHighCPUUsage
+            expr: |
+              (
+                sum(rate(container_cpu_usage_seconds_total{namespace=~"litellm|langfuse|open-webui"}[5m])) by (namespace, pod)
+                /
+                sum(kube_pod_container_resource_limits{resource="cpu", namespace=~"litellm|langfuse|open-webui"}) by (namespace, pod)
+              ) > 0.90
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} high CPU usage"
+              description: "Pod is using {{ $value | humanizePercentage }} of CPU limit."
+
+          # High memory usage
+          - alert: PodHighMemoryUsage
+            expr: |
+              (
+                sum(container_memory_working_set_bytes{namespace=~"litellm|langfuse|open-webui"}) by (namespace, pod)
+                /
+                sum(kube_pod_container_resource_limits{resource="memory", namespace=~"litellm|langfuse|open-webui"}) by (namespace, pod)
+              ) > 0.90
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} high memory usage"
+              description: "Pod is using {{ $value | humanizePercentage }} of memory limit."
+
+          # Node pressure
+          - alert: NodeUnderPressure
+            expr: |
+              kube_node_status_condition{condition=~"MemoryPressure|DiskPressure",status="true"} == 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} is under {{ $labels.condition }}"
+              description: "Node has been under pressure for more than 5 minutes."
+
+      - name: llmops-cost-tracking
+        interval: 1h
+        rules:
+          # Daily cost spike (requires custom metrics from LiteLLM)
+          - alert: DailyLLMCostSpike
+            expr: |
+              sum(increase(litellm_total_cost_usd[24h])) > 200
+            labels:
+              severity: warning
+              component: cost
+            annotations:
+              summary: "Daily LLM cost exceeds budget"
+              description: "Total LLM cost in last 24h is ${{ $value }}, exceeding $200 budget."
+
+          # User/team high token consumption (requires custom metrics)
+          - alert: UserHighTokenConsumption
+            expr: |
+              (
+                sum(increase(litellm_tokens_total[24h])) by (user)
+                /
+                sum(increase(litellm_tokens_total[24h]))
+              ) > 0.30
+            labels:
+              severity: warning
+              component: cost
+            annotations:
+              summary: "User {{ $labels.user }} consuming >30% of daily tokens"
+              description: "User is consuming {{ $value | humanizePercentage }} of total daily token budget."
+
+      - name: llmops-security
+        interval: 5m
+        rules:
+          # Sensitive prompt detection (requires custom metrics from Langfuse)
+          - alert: SensitivePromptDetected
+            expr: increase(langfuse_sensitive_prompts_total[5m]) > 0
+            labels:
+              severity: critical
+              component: security
+            annotations:
+              summary: "Sensitive data detected in prompts"
+              description: "{{ $value }} prompts with potential sensitive data detected in last 5 minutes."
+
+          # Unusual request pattern
+          - alert: UnusualRequestPattern
+            expr: |
+              rate(litellm_request_total[5m]) > 2 * avg_over_time(rate(litellm_request_total[5m])[1h:5m])
+            for: 10m
+            labels:
+              severity: warning
+              component: security
+            annotations:
+              summary: "Unusual spike in LLM requests"
+              description: "Request rate is {{ $value }} req/s, significantly higher than normal."

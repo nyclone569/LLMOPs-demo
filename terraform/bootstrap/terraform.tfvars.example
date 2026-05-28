@@ -1,0 +1,24 @@
+# AWS Configuration
+aws_region = "ap-southeast-1"
+
+# Project Configuration
+project_name = "llmops-platform"
+environment  = "dev"
+
+# AWS Load Balancer Controller
+aws_load_balancer_controller_version = "1.6.2"
+
+# External Secrets Operator
+external_secrets_version = "0.9.11"
+
+# Cert-Manager
+cert_manager_version = "v1.13.3"
+
+# Metrics Server
+metrics_server_version = "3.11.0"
+
+# ArgoCD
+argocd_version          = "5.51.6"
+argocd_admin_password   = "" # Leave empty to auto-generate
+argocd_ingress_enabled  = true
+argocd_ingress_host     = "argocd.llmops-platform.com"

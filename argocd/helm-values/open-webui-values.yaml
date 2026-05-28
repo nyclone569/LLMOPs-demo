@@ -1,0 +1,206 @@
+# Open WebUI Helm Values for LLMOps Platform
+# Chart: open-webui/open-webui
+# Purpose: Chat interface for LLM interactions
+
+# ============================================================================
+# IMAGE CONFIGURATION
+# ============================================================================
+image:
+  repository: ghcr.io/open-webui/open-webui
+  tag: "main"  # Or pin to specific version
+  pullPolicy: IfNotPresent
+
+# ============================================================================
+# DEPLOYMENT
+# ============================================================================
+replicaCount: 2
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# ============================================================================
+# OLLAMA CONFIGURATION
+# ============================================================================
+# Disable built-in Ollama (we're using LiteLLM proxy)
+ollama:
+  enabled: false
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+env:
+  # OpenAI API configuration (pointing to LiteLLM)
+  - name: OPENAI_API_BASE_URL
+    value: "http://litellm.litellm.svc.cluster.local:4000"
+
+  - name: OPENAI_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LITELLM_MASTER_KEY
+
+  # WebUI secret key for session management
+  - name: WEBUI_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: WEBUI_SECRET_KEY
+
+  # Application settings
+  - name: WEBUI_NAME
+    value: "LLMOps Chat"
+
+  - name: ENABLE_SIGNUP
+    value: "true"
+
+  - name: DEFAULT_USER_ROLE
+    value: "user"
+
+  # Disable Ollama since we're using LiteLLM
+  - name: ENABLE_OLLAMA_API
+    value: "false"
+
+  # Enable OpenAI API
+  - name: ENABLE_OPENAI_API
+    value: "true"
+
+  # Logging
+  - name: WEBUI_LOG_LEVEL
+    value: "INFO"
+
+# ============================================================================
+# PERSISTENCE
+# ============================================================================
+persistence:
+  enabled: true
+  storageClass: "gp3"
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  # Mount path for user data and uploads
+  mountPath: /app/backend/data
+
+# ============================================================================
+# SERVICE
+# ============================================================================
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+
+# ============================================================================
+# INGRESS
+# ============================================================================
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    # ALB configuration
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # Health check
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # Security
+    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"  # UPDATE THIS
+
+    # Tags
+    alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=open-webui"
+
+  hosts:
+    - host: chat.internal.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: open-webui-tls
+      hosts:
+        - chat.internal.yourdomain.com
+
+# ============================================================================
+# HEALTH CHECKS
+# ============================================================================
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 20
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+# ============================================================================
+# SECURITY CONTEXT
+# ============================================================================
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# ============================================================================
+# POD DISRUPTION BUDGET
+# ============================================================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ============================================================================
+# AUTOSCALING
+# ============================================================================
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ============================================================================
+# LABELS
+# ============================================================================
+labels:
+  app.kubernetes.io/part-of: llmops-platform
+  app.kubernetes.io/component: frontend
+
+# ============================================================================
+# ANNOTATIONS
+# ============================================================================
+podAnnotations:
+  prometheus.io/scrape: "false"

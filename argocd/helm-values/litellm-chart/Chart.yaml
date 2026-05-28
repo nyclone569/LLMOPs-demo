@@ -1,0 +1,13 @@
+apiVersion: v2
+name: litellm
+description: LiteLLM Proxy - Unified LLM Gateway
+type: application
+version: 1.0.0
+appVersion: "main-latest"
+keywords:
+  - llm
+  - proxy
+  - openai
+  - langfuse
+maintainers:
+  - name: LLMOps Team

@@ -1,0 +1,232 @@
+# Langfuse Helm Values for LLMOps Platform
+# Chart: langfuse/langfuse
+# Purpose: LLM observability and analytics platform
+
+# ============================================================================
+# IMAGE CONFIGURATION
+# ============================================================================
+image:
+  repository: langfuse/langfuse
+  tag: "2.0.0"  # Pin to specific version
+  pullPolicy: IfNotPresent
+
+# ============================================================================
+# DEPLOYMENT
+# ============================================================================
+replicaCount: 2
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+# Use Supabase cloud PostgreSQL (disable built-in PostgreSQL)
+postgresql:
+  enabled: false
+
+# Database connection injected from Kubernetes secret
+env:
+  # Database URL from Supabase
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: llmops-supabase-secret
+        key: LANGFUSE_DB_URL
+
+  # Direct database URL (same as DATABASE_URL, required by Langfuse)
+  - name: DIRECT_URL
+    valueFrom:
+      secretKeyRef:
+        name: llmops-supabase-secret
+        key: LANGFUSE_DB_URL
+
+  # Authentication keys
+  - name: NEXTAUTH_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LANGFUSE_SECRET_KEY
+
+  - name: SALT
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LANGFUSE_SECRET_KEY  # Use same as NEXTAUTH_SECRET
+
+  # Public key for API access
+  - name: LANGFUSE_PUBLIC_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LANGFUSE_PUBLIC_KEY
+
+  # Application URL (used for callbacks and links)
+  - name: NEXTAUTH_URL
+    value: "https://langfuse.internal.yourdomain.com"
+
+  # Disable telemetry (internal platform, no phone home)
+  - name: TELEMETRY_ENABLED
+    value: "false"
+
+  # Node environment
+  - name: NODE_ENV
+    value: "production"
+
+  # Enable JSON logging for better observability
+  - name: JSON_LOGS
+    value: "true"
+
+# ============================================================================
+# DATABASE MIGRATIONS
+# ============================================================================
+# Run migrations as init container on startup
+initContainers:
+  - name: db-migrations
+    image: langfuse/langfuse:2.0.0
+    command:
+      - sh
+      - -c
+      - |
+        echo "Running database migrations..."
+        npx prisma migrate deploy
+        echo "Migrations completed successfully"
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: llmops-supabase-secret
+            key: LANGFUSE_DB_URL
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+# ============================================================================
+# SERVICE
+# ============================================================================
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+  annotations: {}
+
+# ============================================================================
+# INGRESS
+# ============================================================================
+ingress:
+  enabled: true
+  className: alb  # AWS Load Balancer Controller
+  annotations:
+    # ALB configuration
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # Health check configuration
+    alb.ingress.kubernetes.io/healthcheck-path: /api/public/health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # Security
+    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"  # UPDATE THIS
+
+    # Tags
+    alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=langfuse"
+
+  hosts:
+    - host: langfuse.internal.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: langfuse-tls
+      hosts:
+        - langfuse.internal.yourdomain.com
+
+# ============================================================================
+# HEALTH CHECKS
+# ============================================================================
+livenessProbe:
+  httpGet:
+    path: /api/public/health
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/public/health
+    port: 3000
+  initialDelaySeconds: 20
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+# ============================================================================
+# SECURITY CONTEXT
+# ============================================================================
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# ============================================================================
+# POD DISRUPTION BUDGET
+# ============================================================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ============================================================================
+# AUTOSCALING (disabled for now, can enable later)
+# ============================================================================
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ============================================================================
+# LABELS
+# ============================================================================
+labels:
+  app.kubernetes.io/part-of: llmops-platform
+  app.kubernetes.io/component: observability
+
+# ============================================================================
+# ANNOTATIONS
+# ============================================================================
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+  prometheus.io/path: "/api/public/metrics"

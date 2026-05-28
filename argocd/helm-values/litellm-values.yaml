@@ -1,0 +1,360 @@
+# LiteLLM Helm Values for LLMOps Platform
+# Purpose: Unified LLM proxy gateway with observability
+
+# ============================================================================
+# IMAGE CONFIGURATION
+# ============================================================================
+image:
+  repository: ghcr.io/berriai/litellm
+  tag: "main-latest"  # Or pin to specific version like "main-v1.0.0"
+  pullPolicy: IfNotPresent
+
+# ============================================================================
+# DEPLOYMENT
+# ============================================================================
+replicaCount: 3
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+env:
+  # Master key for API authentication
+  - name: LITELLM_MASTER_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LITELLM_MASTER_KEY
+
+  # Salt key for encryption
+  - name: LITELLM_SALT_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LITELLM_SALT_KEY
+
+  # Database URL for spend tracking and logging
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: llmops-supabase-secret
+        key: LITELLM_DB_URL
+
+  # Redis URL for caching
+  - name: REDIS_HOST
+    value: "redis-master.redis.svc.cluster.local"
+
+  - name: REDIS_PORT
+    value: "6379"
+
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: REDIS_PASSWORD
+
+  # Langfuse callback configuration
+  - name: LANGFUSE_PUBLIC_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LANGFUSE_PUBLIC_KEY
+
+  - name: LANGFUSE_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: LANGFUSE_SECRET_KEY
+
+  - name: LANGFUSE_HOST
+    value: "http://langfuse.langfuse.svc.cluster.local:3000"
+
+  # Provider API keys
+  - name: OPENAI_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: OPENAI_API_KEY
+
+  - name: ANTHROPIC_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: ANTHROPIC_API_KEY
+
+  - name: GEMINI_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: GEMINI_API_KEY
+
+  # LiteLLM settings
+  - name: LITELLM_LOG
+    value: "INFO"
+
+  - name: JSON_LOGS
+    value: "true"
+
+# ============================================================================
+# LITELLM CONFIG
+# ============================================================================
+# LiteLLM configuration file (config.yaml)
+config:
+  model_list:
+    # OpenAI GPT-4o (primary for general chat)
+    - model_name: gpt-4o
+      litellm_params:
+        model: openai/gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
+        timeout: 300
+        max_retries: 2
+
+    # OpenAI GPT-4o-mini (fast, cost-effective)
+    - model_name: gpt-4o-mini
+      litellm_params:
+        model: openai/gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
+        timeout: 300
+        max_retries: 2
+
+    # Anthropic Claude Sonnet (coding assistant)
+    - model_name: claude-sonnet
+      litellm_params:
+        model: anthropic/claude-sonnet-4-20250514
+        api_key: os.environ/ANTHROPIC_API_KEY
+        timeout: 300
+        max_retries: 2
+
+    # Anthropic Claude Haiku (fast chat)
+    - model_name: claude-haiku
+      litellm_params:
+        model: anthropic/claude-haiku-4-20250228
+        api_key: os.environ/ANTHROPIC_API_KEY
+        timeout: 300
+        max_retries: 2
+
+    # Google Gemini 1.5 Pro (long context)
+    - model_name: gemini-1.5-pro
+      litellm_params:
+        model: gemini/gemini-1.5-pro
+        api_key: os.environ/GEMINI_API_KEY
+        timeout: 300
+        max_retries: 2
+
+    # Google Gemini 1.5 Flash (fast, cost-effective)
+    - model_name: gemini-1.5-flash
+      litellm_params:
+        model: gemini/gemini-1.5-flash
+        api_key: os.environ/GEMINI_API_KEY
+        timeout: 300
+        max_retries: 2
+
+  # LiteLLM settings
+  litellm_settings:
+    # Logging
+    set_verbose: false
+    json_logs: true
+
+    # Callbacks
+    success_callback: ["langfuse"]
+    failure_callback: ["langfuse"]
+
+    # Database logging
+    database_url: os.environ/DATABASE_URL
+
+    # Redis caching
+    cache: true
+    cache_params:
+      type: redis
+      host: os.environ/REDIS_HOST
+      port: os.environ/REDIS_PORT
+      password: os.environ/REDIS_PASSWORD
+      ttl: 600  # Cache TTL in seconds (10 minutes)
+
+    # Rate limiting (global defaults)
+    rpm_limit: 1000
+    tpm_limit: 100000
+
+    # Fallback models - resilience when primary provider fails
+    fallbacks: [
+      {
+        "gpt-4o": ["claude-sonnet", "gemini-1.5-pro"]
+      },
+      {
+        "claude-sonnet": ["gpt-4o", "gemini-1.5-pro"]
+      },
+      {
+        "gemini-1.5-pro": ["gpt-4o", "claude-sonnet"]
+      },
+      {
+        "gpt-4o-mini": ["claude-haiku", "gemini-1.5-flash"]
+      },
+      {
+        "claude-haiku": ["gpt-4o-mini", "gemini-1.5-flash"]
+      },
+      {
+        "gemini-1.5-flash": ["gpt-4o-mini", "claude-haiku"]
+      }
+    ]
+
+    # Retry settings
+    num_retries: 2
+    request_timeout: 300
+
+    # Cost tracking
+    track_cost_callback: true
+
+    # Budget limits per user/team (in USD)
+    budget_duration: "30d"  # Budget resets every 30 days
+
+    # Per-model rate limits (more granular than global)
+    model_max_budget: {
+      "gpt-4o": 50.0,           # $50/month per user for GPT-4o
+      "claude-sonnet": 50.0,    # $50/month per user for Claude Sonnet
+      "gemini-1.5-pro": 30.0,   # $30/month per user for Gemini Pro
+      "gpt-4o-mini": 10.0,      # $10/month per user for mini models
+      "claude-haiku": 10.0,
+      "gemini-1.5-flash": 10.0
+    }
+
+    # Per-user budget limits
+    max_budget: 100.0  # $100/month per user default
+
+    # Per-model RPM limits (prevent abuse of expensive models)
+    model_rpm_limit: {
+      "gpt-4o": 20,           # 20 requests/min for expensive models
+      "claude-sonnet": 20,
+      "gemini-1.5-pro": 20,
+      "gpt-4o-mini": 100,     # 100 requests/min for cheaper models
+      "claude-haiku": 100,
+      "gemini-1.5-flash": 100
+    }
+
+# ============================================================================
+# SERVICE
+# ============================================================================
+service:
+  type: ClusterIP
+  port: 4000
+  targetPort: 4000
+  annotations: {}
+
+# ============================================================================
+# INGRESS
+# ============================================================================
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    # ALB configuration
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # Health check
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # Security
+    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"  # UPDATE THIS
+
+    # Tags
+    alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=litellm"
+
+  hosts:
+    - host: gateway.internal.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: litellm-tls
+      hosts:
+        - gateway.internal.yourdomain.com
+
+# ============================================================================
+# HEALTH CHECKS
+# ============================================================================
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 4000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 4000
+  initialDelaySeconds: 20
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+
+# ============================================================================
+# SECURITY CONTEXT
+# ============================================================================
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# ============================================================================
+# POD DISRUPTION BUDGET
+# ============================================================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ============================================================================
+# AUTOSCALING
+# ============================================================================
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ============================================================================
+# LABELS
+# ============================================================================
+labels:
+  app.kubernetes.io/part-of: llmops-platform
+  app.kubernetes.io/component: gateway
+
+# ============================================================================
+# ANNOTATIONS
+# ============================================================================
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "4000"
+  prometheus.io/path: "/metrics"

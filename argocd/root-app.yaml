@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llmops-root
+  namespace: argocd
+  # Finalizer ensures proper cleanup
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: llmops
+
+  # Source: Git repository containing all app definitions
+  source:
+    repoURL: https://github.com/nyclone569/LLMOPs.git
+    targetRevision: main  # or master, depending on your default branch
+    path: argocd/apps
+
+  # Destination: ArgoCD namespace (App of Apps pattern)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  # Automated sync policy
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources when removed from Git
+      selfHeal: true   # Sync when cluster state differs from Git
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Ignore differences in fields that are expected to change
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Application
+      jsonPointers:
+        - /status

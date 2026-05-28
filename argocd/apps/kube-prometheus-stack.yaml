@@ -1,0 +1,242 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  project: llmops
+
+  # Source: Prometheus Community Helm chart
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 56.0.0
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        # Prometheus configuration
+        prometheus:
+          prometheusSpec:
+            retention: 15d
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+
+            # Service monitors for LLMOps platform
+            additionalScrapeConfigs:
+              - job_name: 'litellm'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names:
+                        - litellm
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    action: replace
+                    target_label: __metrics_path__
+                    regex: (.+)
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $1:$2
+                    target_label: __address__
+
+              - job_name: 'langfuse'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names:
+                        - langfuse
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    action: replace
+                    target_label: __metrics_path__
+                    regex: (.+)
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $1:$2
+                    target_label: __address__
+
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2Gi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+
+        # Grafana configuration
+        grafana:
+          enabled: true
+          adminPassword: changeme  # CHANGE THIS IN PRODUCTION
+
+          ingress:
+            enabled: true
+            ingressClassName: alb
+            annotations:
+              alb.ingress.kubernetes.io/scheme: internal
+              alb.ingress.kubernetes.io/target-type: ip
+              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+              alb.ingress.kubernetes.io/ssl-redirect: "443"
+              alb.ingress.kubernetes.io/healthcheck-path: /api/health
+            hosts:
+              - grafana.internal.yourdomain.com
+
+          persistence:
+            enabled: true
+            storageClassName: gp3
+            size: 10Gi
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Pre-configured dashboards
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+                - name: 'llmops'
+                  orgId: 1
+                  folder: 'LLMOps Platform'
+                  type: file
+                  disableDeletion: false
+                  editable: true
+                  options:
+                    path: /var/lib/grafana/dashboards/llmops
+
+          # Additional data sources
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki-gateway.loki.svc.cluster.local
+              access: proxy
+              isDefault: false
+
+        # Alertmanager configuration
+        alertmanager:
+          enabled: true
+
+          config:
+            global:
+              resolve_timeout: 5m
+
+            route:
+              group_by: ['alertname', 'cluster', 'service']
+              group_wait: 10s
+              group_interval: 10s
+              repeat_interval: 12h
+              receiver: 'null'
+              routes:
+                - match:
+                    alertname: Watchdog
+                  receiver: 'null'
+                - match:
+                    severity: critical
+                  receiver: 'critical'
+                - match:
+                    severity: warning
+                  receiver: 'warning'
+
+            receivers:
+              - name: 'null'
+              - name: 'critical'
+                # Configure your notification channel here (Slack, PagerDuty, etc.)
+              - name: 'warning'
+                # Configure your notification channel here
+
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+
+        # Node exporter
+        nodeExporter:
+          enabled: true
+
+        # Kube-state-metrics
+        kubeStateMetrics:
+          enabled: true
+
+        # Default rules
+        defaultRules:
+          create: true
+          rules:
+            alertmanager: true
+            etcd: false
+            configReloaders: true
+            general: true
+            k8s: true
+            kubeApiserverAvailability: true
+            kubeApiserverSlos: true
+            kubelet: true
+            kubeProxy: true
+            kubePrometheusGeneral: true
+            kubePrometheusNodeRecording: true
+            kubernetesApps: true
+            kubernetesResources: true
+            kubernetesStorage: true
+            kubernetesSystem: true
+            kubeScheduler: false
+            kubeStateMetrics: true
+            network: true
+            node: true
+            nodeExporterAlerting: true
+            nodeExporterRecording: true
+            prometheus: true
+            prometheusOperator: true
+
+  # Destination: monitoring namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  # Automated sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Health assessment
+  info:
+    - name: Description
+      value: Prometheus, Grafana, and Alertmanager for platform monitoring
+    - name: Grafana URL
+      value: https://grafana.internal.yourdomain.com

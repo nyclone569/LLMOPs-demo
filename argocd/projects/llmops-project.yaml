@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: llmops
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: LLMOps Platform Project - manages all LLM infrastructure components
+
+  sourceRepos:
+    - https://github.com/nyclone569/LLMOPs.git
+    - https://charts.bitnami.com/bitnami
+    - https://langfuse.github.io/langfuse-k8s
+    - https://helm.openwebui.com
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+
+  destinations:
+    - namespace: redis
+      server: https://kubernetes.default.svc
+    - namespace: langfuse
+      server: https://kubernetes.default.svc
+    - namespace: litellm
+      server: https://kubernetes.default.svc
+    - namespace: open-webui
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: loki
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  namespaceResourceBlacklist: []
+
+  orphanedResources:
+    warn: true

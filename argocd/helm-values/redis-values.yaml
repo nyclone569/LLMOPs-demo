@@ -1,0 +1,161 @@
+# Redis Helm Values for LLMOps Platform
+# Chart: bitnami/redis
+# Purpose: In-cluster caching for LiteLLM proxy
+
+# ============================================================================
+# ARCHITECTURE
+# ============================================================================
+# Use standalone mode (not cluster) for simplicity and cost efficiency
+architecture: standalone
+
+# ============================================================================
+# AUTHENTICATION
+# ============================================================================
+auth:
+  enabled: true
+  # Password injected from Kubernetes secret (managed by External Secrets)
+  existingSecret: llmops-apikeys-secret
+  existingSecretPasswordKey: REDIS_PASSWORD
+
+# ============================================================================
+# MASTER CONFIGURATION
+# ============================================================================
+master:
+  # Resource allocation
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+  # Persistence for data durability
+  persistence:
+    enabled: true
+    storageClass: "gp3"  # AWS EBS gp3 for better performance
+    size: 8Gi
+    accessModes:
+      - ReadWriteOnce
+
+  # Service configuration - ClusterIP only (no external access)
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+  # Pod disruption budget for availability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Liveness and readiness probes
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 20
+    periodSeconds: 5
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 5
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 20
+    periodSeconds: 5
+    timeoutSeconds: 1
+    successThreshold: 1
+    failureThreshold: 5
+
+# ============================================================================
+# REPLICA CONFIGURATION (disabled for standalone)
+# ============================================================================
+replica:
+  replicaCount: 0
+
+# ============================================================================
+# SENTINEL CONFIGURATION (disabled for standalone)
+# ============================================================================
+sentinel:
+  enabled: false
+
+# ============================================================================
+# METRICS
+# ============================================================================
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # Enable if Prometheus Operator is installed
+
+  resources:
+    requests:
+      memory: "32Mi"
+      cpu: "10m"
+    limits:
+      memory: "64Mi"
+      cpu: "50m"
+
+# ============================================================================
+# SECURITY
+# ============================================================================
+# Run as non-root user
+securityContext:
+  enabled: true
+  fsGroup: 1001
+  runAsUser: 1001
+
+# Pod security context
+podSecurityContext:
+  enabled: true
+  fsGroup: 1001
+
+# Container security context
+containerSecurityContext:
+  enabled: true
+  runAsUser: 1001
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# ============================================================================
+# NETWORK POLICY
+# ============================================================================
+networkPolicy:
+  enabled: false  # Enable if network policies are required
+  # allowExternal: false
+  # ingressNSMatchLabels: {}
+  # ingressNSPodMatchLabels: {}
+
+# ============================================================================
+# COMMON LABELS
+# ============================================================================
+commonLabels:
+  app.kubernetes.io/part-of: llmops-platform
+  app.kubernetes.io/component: cache
+
+# ============================================================================
+# REDIS CONFIGURATION
+# ============================================================================
+# Custom Redis configuration
+commonConfiguration: |-
+  # Enable AOF persistence for durability
+  appendonly yes
+  appendfsync everysec
+
+  # Memory management
+  maxmemory 200mb
+  maxmemory-policy allkeys-lru
+
+  # Disable dangerous commands
+  rename-command FLUSHDB ""
+  rename-command FLUSHALL ""
+  rename-command CONFIG ""
+
+  # Logging
+  loglevel notice
+
+  # Performance tuning
+  tcp-backlog 511
+  timeout 0
+  tcp-keepalive 300

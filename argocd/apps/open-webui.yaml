@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: open-webui
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  project: llmops
+
+  sources:
+    - repoURL: https://helm.openwebui.com
+      chart: open-webui
+      targetRevision: 3.1.8
+      helm:
+        releaseName: open-webui
+        valueFiles:
+          - $values/argocd/helm-values/open-webui-values.yaml
+    - repoURL: https://github.com/nyclone569/LLMOPs.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: open-webui
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: networking.k8s.io
+      kind: Ingress
+      jsonPointers:
+        - /status
+        - /metadata/annotations/alb.ingress.kubernetes.io~1load-balancer-name
+
+  info:
+    - name: Description
+      value: Open WebUI chat interface for LLM interactions
+    - name: URL
+      value: https://chat.internal.yourdomain.com

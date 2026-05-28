@@ -1,18 +1,3 @@
-# Secrets
-.env
-.env.local
-*.tfvars
-!*.tfvars.example
-
-# Terraform state local
-*.tfstate
-*.tfstate.backup
-.terraform/
-
-# Keys
-*.pem
-*.key
-
 # Local .terraform directories
 **/.terraform/*
 

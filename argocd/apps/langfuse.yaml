@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: langfuse
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: llmops
+
+  sources:
+    - repoURL: https://langfuse.github.io/langfuse-k8s
+      chart: langfuse
+      targetRevision: 1.0.0
+      helm:
+        releaseName: langfuse
+        valueFiles:
+          - $values/argocd/helm-values/langfuse-values.yaml
+    - repoURL: https://github.com/nyclone569/LLMOPs.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: langfuse
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: networking.k8s.io
+      kind: Ingress
+      jsonPointers:
+        - /status
+        - /metadata/annotations/alb.ingress.kubernetes.io~1load-balancer-name
+
+  info:
+    - name: Description
+      value: Langfuse LLM observability and analytics platform
+    - name: URL
+      value: https://langfuse.internal.yourdomain.com

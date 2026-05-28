@@ -1,0 +1,18 @@
+# AWS Configuration
+aws_region = "ap-southeast-1"
+
+# Project Configuration
+project_name = "llmops-platform"
+environment  = "dev"
+
+# ElastiCache Redis Configuration
+redis_node_type            = "cache.t3.micro"
+redis_num_cache_nodes      = 1
+redis_engine_version       = "7.0"
+redis_parameter_group_family = "redis7"
+redis_port                 = 6379
+
+# External Secrets Configuration
+secrets_namespace      = "default"
+supabase_secret_name   = "llmops/supabase"
+api_keys_secret_name   = "llmops/apikeys"

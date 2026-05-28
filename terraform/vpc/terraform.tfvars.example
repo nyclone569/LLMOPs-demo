@@ -1,0 +1,24 @@
+# AWS Configuration
+aws_region = "ap-southeast-1"
+
+# Project Configuration
+project_name = "llmops-platform"
+environment  = "dev"
+
+# VPC Configuration
+vpc_cidr             = "10.0.0.0/16"
+availability_zones   = ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+
+# EKS Configuration
+cluster_name = "llmops-platform-eks"
+
+# NAT Gateway Configuration
+# Set to true for single NAT (cost saving, non-prod)
+# Set to false for NAT per AZ (high availability, prod)
+single_nat_gateway = true
+
+# VPC Flow Logs
+# Enable for production environments
+enable_flow_logs = false
