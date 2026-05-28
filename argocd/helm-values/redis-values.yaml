@@ -7,8 +7,8 @@
 # ============================================================================
 image:
   registry: docker.io
-  repository: library/redis
-  tag: 7.4.2
+  repository: bitnami/redis
+  tag: latest
 
 # ============================================================================
 # ARCHITECTURE
@@ -94,8 +94,8 @@ metrics:
   
   image:
     registry: docker.io
-    repository: oliver006/redis_exporter
-    tag: v1.67.0
+    repository: bitnami/redis-exporter
+    tag: latest
   serviceMonitor:
     enabled: false  # Enable if Prometheus Operator is installed
 
