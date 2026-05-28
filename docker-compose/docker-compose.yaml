@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Only needed if NOT using Supabase Cloud
+  # Comment out this entire service if using Supabase Cloud
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: llmops-postgres
+  #   environment:
+  #     POSTGRES_USER: llmops
+  #     POSTGRES_PASSWORD: llmops_password_change_me
+  #     POSTGRES_DB: llmops
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+  #   ports:
+  #     - "5432:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U llmops"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - llmops-network
+
+  # Redis - Caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: llmops-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llmops-network
+
+  # Langfuse - LLM Observability Platform
+  langfuse-server:
+    image: langfuse/langfuse:latest
+    container_name: llmops-langfuse-server
+    environment:
+      # Supabase Connection
+      DATABASE_URL: ${SUPABASE_DATABASE_URL}
+      DIRECT_URL: ${SUPABASE_DIRECT_URL}
+      
+      # Langfuse Configuration
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      SALT: ${SALT}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+    ports:
+      - "3000:3000"
+    networks:
+      - llmops-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # LiteLLM Proxy - LLM Gateway
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: llmops-litellm
+    depends_on:
+      redis:
+        condition: service_healthy
+      langfuse-server:
+        condition: service_started
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: ${SUPABASE_LITELLM_URL}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      
+      # Langfuse Integration
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: http://langfuse-server:3000
+      
+      # Provider API Keys (set these with your actual keys)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-dummy}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-dummy}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-dummy}
+      
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+    ports:
+      - "4000:4000"
+    networks:
+      - llmops-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama - Local LLM for sensitive/private workloads
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llmops-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - llmops-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Open WebUI - Chat Interface
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: llmops-open-webui
+    depends_on:
+      - litellm
+    environment:
+      # Database
+      DATABASE_URL: ${SUPABASE_OPENWEBUI_URL}
+      
+      # OpenAI API Configuration (pointing to LiteLLM)
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      
+      # Disable direct Ollama connection (force through LiteLLM)
+      ENABLE_OLLAMA_API: "false"
+      
+      # UI Configuration
+      WEBUI_NAME: "Internal LLM Platform"
+      WEBUI_AUTH: "true"
+      ENABLE_SIGNUP: "true"
+      DEFAULT_USER_ROLE: "user"
+      
+      # Features
+      ENABLE_RAG_WEB_SEARCH: "false"
+      ENABLE_IMAGE_GENERATION: "false"
+      
+    volumes:
+      - open_webui_data:/app/backend/data
+    ports:
+      - "8080:8080"
+    networks:
+      - llmops-network
+    restart: unless-stopped
+
+volumes:
+  # postgres_data:  # Not needed with Supabase Cloud
+  redis_data:
+  ollama_data:
+  open_webui_data:
+
+networks:
+  llmops-network:
+    driver: bridge

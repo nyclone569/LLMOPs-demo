@@ -1,0 +1,162 @@
+model_list:
+  # Fast Chat Models - General internal chat
+  - model_name: fast-chat
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat
+      supports_function_calling: true
+      
+  - model_name: fast-chat
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      
+  - model_name: fast-chat
+    litellm_params:
+      model: claude-3-haiku-20240307
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+
+  # Coding Assistant - Engineering and code review
+  - model_name: coding-assistant
+    litellm_params:
+      model: gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      supports_function_calling: true
+      
+  - model_name: coding-assistant
+    litellm_params:
+      model: claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      
+  - model_name: coding-assistant
+    litellm_params:
+      model: gemini/gemini-2.0-flash-exp
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat
+
+  # Private Chat - Local models for sensitive data
+  - model_name: private-chat
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://ollama:11434
+    model_info:
+      mode: chat
+      
+  - model_name: private-chat
+    litellm_params:
+      model: ollama/qwen2.5:7b
+      api_base: http://ollama:11434
+    model_info:
+      mode: chat
+
+  # Long Context - Large document analysis
+  - model_name: long-context
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat
+      max_tokens: 2097152
+      
+  - model_name: long-context
+    litellm_params:
+      model: claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      max_tokens: 200000
+
+  # Fallback Model - Backup when primary fails
+  - model_name: fallback-model
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat
+
+# Router settings for load balancing and fallbacks
+router_settings:
+  routing_strategy: latency-based-routing  # Route to fastest responding model
+  num_retries: 2
+  timeout: 60
+  fallbacks:
+    - fast-chat: [fallback-model]
+    - coding-assistant: [fast-chat, fallback-model]
+    - long-context: [fast-chat]
+  allowed_fails: 3  # Number of fails before removing from rotation
+  cooldown_time: 60  # Seconds before retry after failure
+
+# General settings
+litellm_settings:
+  # Observability - Langfuse integration
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  
+  # Caching
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 3600  # 1 hour cache
+  
+  # Request settings
+  drop_params: true  # Drop unsupported params instead of failing
+  max_parallel_requests: 100
+  
+  # Logging
+  set_verbose: true
+  json_logs: true
+
+# Budget and rate limiting
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  
+  # Database for tracking usage
+  database_url: os.environ/DATABASE_URL
+  
+  # Budget limits (USD per month)
+  max_budget: 6000  # $200/day * 30 days
+  budget_duration: 30d
+  
+  # Rate limiting
+  rpm: 1000  # requests per minute
+  tpm: 1000000  # tokens per minute
+  
+  # User/Team budgets (will be configured via API)
+  # These are examples - actual implementation via LiteLLM admin API
+  
+# Model-specific settings
+model_settings:
+  - model_name: coding-assistant
+    litellm_params:
+      rpm: 100  # Lower rate limit for expensive models
+      max_tokens: 4096
+      temperature: 0.3
+      
+  - model_name: long-context
+    litellm_params:
+      rpm: 20  # Very low rate limit for expensive long-context
+      timeout: 120
+      
+  - model_name: private-chat
+    litellm_params:
+      rpm: 200
+      timeout: 90
+
+# Environment-specific callbacks
+environment_variables:
+  LANGFUSE_PUBLIC_KEY: os.environ/LANGFUSE_PUBLIC_KEY
+  LANGFUSE_SECRET_KEY: os.environ/LANGFUSE_SECRET_KEY
+  LANGFUSE_HOST: os.environ/LANGFUSE_HOST
