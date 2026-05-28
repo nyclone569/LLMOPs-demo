@@ -160,10 +160,9 @@ commonConfiguration: |-
   maxmemory 200mb
   maxmemory-policy allkeys-lru
 
-  # Disable dangerous commands
-  rename-command FLUSHDB ""
-  rename-command FLUSHALL ""
-  rename-command CONFIG ""
+  # Note: rename-command is deprecated in Redis 8.x
+  # Use ACLs for command restrictions instead
+  # For now, relying on network isolation (ClusterIP only)
 
   # Logging
   loglevel notice
