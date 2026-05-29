@@ -14,6 +14,21 @@ image:
 # ============================================================================
 replicaCount: 3
 
+# Init container to prepare cache directories
+initContainers:
+  - name: prepare-cache
+    image: busybox:latest
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /root/.cache/prisma-python
+        chmod -R 777 /root/.cache
+        echo "Cache directory prepared"
+    volumeMounts:
+      - name: root-cache
+        mountPath: /root/.cache
+
 # ============================================================================
 # RESOURCES
 # ============================================================================
@@ -111,6 +126,10 @@ env:
 
   - name: PRISMA_ENGINES_MIRROR
     value: "https://binaries.prisma.sh"
+
+  # Override Prisma binary cache directory
+  - name: PRISMA_BINARY_CACHE_DIR
+    value: "/tmp/.cache/prisma-python"
 
   # Set writable directory for LiteLLM migrations
   - name: LITELLM_MIGRATION_DIR
@@ -361,6 +380,17 @@ autoscaling:
 labels:
   app.kubernetes.io/part-of: llmops-platform
   app.kubernetes.io/component: gateway
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  - name: root-cache
+    emptyDir: {}
+
+volumeMounts:
+  - name: root-cache
+    mountPath: /root/.cache
 
 # ============================================================================
 # ANNOTATIONS
