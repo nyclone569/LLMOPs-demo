@@ -80,11 +80,15 @@ spec:
           subPath: config.yaml
         - name: cache
           mountPath: /.cache
+        - name: npm-cache
+          mountPath: /.npm
       volumes:
       - name: config
         configMap:
           name: {{ include "litellm.fullname" . }}-config
       - name: cache
+        emptyDir: {}
+      - name: npm-cache
         emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
