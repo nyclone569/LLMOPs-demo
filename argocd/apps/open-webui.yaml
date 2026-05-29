@@ -13,7 +13,7 @@ spec:
   sources:
     - repoURL: https://helm.openwebui.com
       chart: open-webui
-      targetRevision: 3.1.8
+      targetRevision: 14.6.0
       helm:
         releaseName: open-webui
         valueFiles:

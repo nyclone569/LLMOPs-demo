@@ -1,17 +1,18 @@
 # Open WebUI Helm Values for LLMOps Platform
-# Chart: open-webui/open-webui
+# Chart: open-webui/open-webui (v14.6.0)
 # Purpose: Chat interface for LLM interactions
+# Updated to match chart v14.x schema
 
 # ============================================================================
 # IMAGE CONFIGURATION
 # ============================================================================
 image:
   repository: ghcr.io/open-webui/open-webui
-  tag: "main"  # Or pin to specific version
+  tag: "0.3.80"  # Pin to known stable version (or "main" for latest)
   pullPolicy: IfNotPresent
 
 # ============================================================================
-# DEPLOYMENT
+# REPLICA COUNT
 # ============================================================================
 replicaCount: 2
 
@@ -29,25 +30,45 @@ resources:
 # ============================================================================
 # OLLAMA CONFIGURATION
 # ============================================================================
-# Disable built-in Ollama (we're using LiteLLM proxy)
+# Disable built-in Ollama (we're using LiteLLM proxy instead)
 ollama:
   enabled: false
+
+# External Ollama URLs (pointing to LiteLLM proxy which handles routing)
+ollamaUrls: []
+
+# ============================================================================
+# PIPELINES
+# ============================================================================
+# Disable pipelines subchart (adds complexity, not needed for basic webui)
+pipelines:
+  enabled: false
+
+# ============================================================================
+# WEBSOCKET
+# ============================================================================
+# Disable websocket subchart (LiteLLM handles WebSocket via its own config)
+websocket:
+  enabled: false
+
+# ============================================================================
+# OPENAI API CONFIGURATION
+# ============================================================================
+# Enable OpenAI API integration (LiteLLM speaks OpenAI-compatible API)
+enableOpenaiApi: true
+
+# Point Open WebUI at LiteLLM proxy
+openaiBaseApiUrl: "http://litellm.litellm.svc.cluster.local:4000/v1"
+
+# OpenAI API key from existing Kubernetes secret
+openaiApiKeyExistingSecret: "llmops-apikeys-secret"
+openaiApiKeyExistingSecretKey: "LITELLM_MASTER_KEY"
 
 # ============================================================================
 # ENVIRONMENT VARIABLES
 # ============================================================================
-env:
-  # OpenAI API configuration (pointing to LiteLLM)
-  - name: OPENAI_API_BASE_URL
-    value: "http://litellm.litellm.svc.cluster.local:4000"
-
-  - name: OPENAI_API_KEY
-    valueFrom:
-      secretKeyRef:
-        name: llmops-apikeys-secret
-        key: LITELLM_MASTER_KEY
-
-  # WebUI secret key for session management
+extraEnvVars:
+  # WebUI session secret
   - name: WEBUI_SECRET_KEY
     valueFrom:
       secretKeyRef:
@@ -64,13 +85,9 @@ env:
   - name: DEFAULT_USER_ROLE
     value: "user"
 
-  # Disable Ollama since we're using LiteLLM
+  # Disable Ollama features since we're using LiteLLM
   - name: ENABLE_OLLAMA_API
     value: "false"
-
-  # Enable OpenAI API
-  - name: ENABLE_OPENAI_API
-    value: "true"
 
   # Logging
   - name: WEBUI_LOG_LEVEL
@@ -81,28 +98,28 @@ env:
 # ============================================================================
 persistence:
   enabled: true
-  storageClass: "gp3"
-  accessMode: ReadWriteOnce
   size: 5Gi
-  # Mount path for user data and uploads
-  mountPath: /app/backend/data
+  storageClass: "gp3"
+  accessModes:
+    - ReadWriteOnce
+  # Data stored at /app/backend/data inside the container
 
 # ============================================================================
 # SERVICE
 # ============================================================================
 service:
   type: ClusterIP
-  port: 8080
-  targetPort: 8080
   annotations: {}
-
+  port: 80
+  containerPort: 8080
+  labels: {}
 
 # ============================================================================
 # INGRESS
 # ============================================================================
 ingress:
   enabled: true
-  className: alb
+  class: alb
   annotations:
     # ALB configuration
     alb.ingress.kubernetes.io/scheme: internal
@@ -117,85 +134,54 @@ ingress:
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
 
-    # Security
-    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"  # UPDATE THIS
+    # Security - UPDATE security group ID
+    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"
 
     # Tags
     alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=open-webui"
 
-  hosts:
-    - host: chat.internal.yourdomain.com
-      paths:
-        - path: /
-          pathType: Prefix
+  host: chat.internal.yourdomain.com
 
-  tls:
-    - secretName: open-webui-tls
-      hosts:
-        - chat.internal.yourdomain.com
+  # TLS: set to true when certificate secret is ready
+  tls: false
+  existingSecret: "open-webui-tls"
 
 # ============================================================================
-# HEALTH CHECKS
+# HEALTH CHECKS (v14.6.0 schema)
 # ============================================================================
 livenessProbe:
   httpGet:
     path: /health
-    port: 8080
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  successThreshold: 1
+    port: http
   failureThreshold: 3
-
+  periodSeconds: 10
 
 readinessProbe:
   httpGet:
     path: /health
-    port: 8080
-  initialDelaySeconds: 20
-  periodSeconds: 5
-  timeoutSeconds: 3
-  successThreshold: 1
+    port: http
   failureThreshold: 3
+  periodSeconds: 5
 
 # ============================================================================
-# SECURITY CONTEXT
+# SECURITY CONTEXT (v14.6.0 uses containerSecurityContext)
 # ============================================================================
-securityContext:
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1000
+
+containerSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
-  fsGroup: 1000
   allowPrivilegeEscalation: false
   capabilities:
     drop:
       - ALL
 
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-
-# ============================================================================
-# POD DISRUPTION BUDGET
-# ============================================================================
-podDisruptionBudget:
-  enabled: true
-  minAvailable: 1
-
-# ============================================================================
-# AUTOSCALING
-# ============================================================================
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 5
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
-
 # ============================================================================
 # LABELS
 # ============================================================================
-labels:
+extraLabels:
   app.kubernetes.io/part-of: llmops-platform
   app.kubernetes.io/component: frontend
 
