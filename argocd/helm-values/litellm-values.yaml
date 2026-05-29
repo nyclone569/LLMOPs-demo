@@ -272,9 +272,6 @@ ingress:
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
 
-    # Security
-    alb.ingress.kubernetes.io/security-groups: "sg-xxxxx"  # UPDATE THIS
-
     # Tags
     alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=litellm"
 
