@@ -95,6 +95,7 @@ spec:
                 paths:
                   - path: /
                     pathType: Prefix
+            tls: []
 
         # Monitoring
         monitoring:
