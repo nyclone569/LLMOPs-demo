@@ -85,10 +85,6 @@ extraEnvVars:
   - name: DEFAULT_USER_ROLE
     value: "user"
 
-  # Disable Ollama features since we're using LiteLLM
-  - name: ENABLE_OLLAMA_API
-    value: "false"
-
   # Logging
   - name: WEBUI_LOG_LEVEL
     value: "INFO"
