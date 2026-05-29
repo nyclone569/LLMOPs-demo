@@ -1,0 +1,30 @@
+global:
+  postgresql:
+    auth:
+      postgresPassword: "changeme123"
+      database: "postgres"
+
+primary:
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: "gp3"
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  initdb:
+    scripts:
+      init.sql: |
+        -- Create schemas for LiteLLM and Langfuse
+        CREATE SCHEMA IF NOT EXISTS litellm;
+        CREATE SCHEMA IF NOT EXISTS langfuse;
+
+        -- Grant permissions
+        GRANT ALL PRIVILEGES ON SCHEMA litellm TO postgres;
+        GRANT ALL PRIVILEGES ON SCHEMA langfuse TO postgres;
