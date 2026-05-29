@@ -8,7 +8,7 @@
 # ============================================================================
 image:
   repository: ghcr.io/open-webui/open-webui
-  tag: "0.3.80"  # Pin to known stable version (or "main" for latest)
+  tag: ""  # Uses chart default (appVersion 0.9.5)
   pullPolicy: IfNotPresent
 
 # ============================================================================
