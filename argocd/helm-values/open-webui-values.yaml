@@ -145,19 +145,36 @@ ingress:
 # ============================================================================
 # HEALTH CHECKS (v14.6.0 schema)
 # ============================================================================
+# Open WebUI's Python startup (langchain + sqlalchemy imports, alembic
+# migrations, then uvicorn bind) takes 60-120s. A startupProbe defers
+# liveness/readiness until the app is actually up, preventing SIGKILL
+# during boot. Without this, the default 30s liveness window kills the
+# container before it can listen on port 8080.
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  failureThreshold: 30   # 30 * 10s = 5 minute startup budget
+  periodSeconds: 10
+  timeoutSeconds: 5
+
 livenessProbe:
   httpGet:
     path: /health
     port: http
+  initialDelaySeconds: 30
   failureThreshold: 3
   periodSeconds: 10
+  timeoutSeconds: 5
 
 readinessProbe:
   httpGet:
     path: /health
     port: http
+  initialDelaySeconds: 30
   failureThreshold: 3
   periodSeconds: 5
+  timeoutSeconds: 3
 
 # ============================================================================
 # SECURITY CONTEXT (v14.6.0 uses containerSecurityContext)
