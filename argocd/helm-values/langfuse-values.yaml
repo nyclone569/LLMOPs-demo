@@ -135,3 +135,21 @@ redis:
   auth:
     existingSecret: llmops-apikeys-secret
     existingSecretPasswordKey: REDIS_PASSWORD
+
+# ============================================================================
+# CLICKHOUSE — deploy bundled ClickHouse with secret-backed password
+# ============================================================================
+clickhouse:
+  deploy: true
+  auth:
+    existingSecret: llmops-apikeys-secret
+    existingSecretKey: CLICKHOUSE_PASSWORD
+
+# ============================================================================
+# S3 — deploy bundled MinIO with secret-backed root password
+# ============================================================================
+s3:
+  deploy: true
+  auth:
+    existingSecret: llmops-apikeys-secret
+    rootPasswordSecretKey: MINIO_ROOT_PASSWORD
