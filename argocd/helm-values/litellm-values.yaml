@@ -328,6 +328,7 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 1000
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # Allow Prisma to write cache files
   capabilities:
     drop:
       - ALL
