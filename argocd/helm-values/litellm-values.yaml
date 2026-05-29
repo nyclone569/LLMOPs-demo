@@ -105,9 +105,16 @@ env:
   - name: JSON_LOGS
     value: "true"
 
-  # Set HOME for Prisma/npm cache (use root to leverage existing template mounts)
-  - name: HOME
-    value: "/"
+  # Prisma cache configuration - use /tmp for writable cache
+  - name: PRISMA_QUERY_ENGINE_LIBRARY
+    value: "/tmp/prisma-engines"
+
+  - name: PRISMA_ENGINES_MIRROR
+    value: "https://binaries.prisma.sh"
+
+  # Set writable directory for LiteLLM migrations
+  - name: LITELLM_MIGRATION_DIR
+    value: "/tmp/litellm-migrations"
 
 # ============================================================================
 # LITELLM CONFIG
