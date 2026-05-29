@@ -105,9 +105,9 @@ env:
   - name: JSON_LOGS
     value: "true"
 
-  # Set HOME for Prisma cache
+  # Set HOME for Prisma/npm cache (use root to leverage existing template mounts)
   - name: HOME
-    value: "/home/litellm"
+    value: "/"
 
 # ============================================================================
 # LITELLM CONFIG
@@ -243,17 +243,6 @@ config:
       "claude-haiku": 100,
       "gemini-1.5-flash": 100
     }
-
-# ============================================================================
-# VOLUMES
-# ============================================================================
-volumes:
-  - name: prisma-cache
-    emptyDir: {}
-
-volumeMounts:
-  - name: prisma-cache
-    mountPath: /home/litellm/.cache
 
 # ============================================================================
 # SERVICE
