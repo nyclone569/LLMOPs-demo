@@ -14,21 +14,6 @@ image:
 # ============================================================================
 replicaCount: 3
 
-# Init container to prepare cache directories
-initContainers:
-  - name: prepare-cache
-    image: busybox:latest
-    command:
-      - sh
-      - -c
-      - |
-        mkdir -p /root/.cache/prisma-python
-        chmod -R 777 /root/.cache
-        echo "Cache directory prepared"
-    volumeMounts:
-      - name: root-cache
-        mountPath: /root/.cache
-
 # ============================================================================
 # RESOURCES
 # ============================================================================
@@ -119,6 +104,10 @@ env:
 
   - name: JSON_LOGS
     value: "true"
+
+  # Override cache directory using XDG standard
+  - name: XDG_CACHE_HOME
+    value: "/tmp/.cache"
 
   # Prisma cache configuration - use /tmp for writable cache
   - name: PRISMA_QUERY_ENGINE_LIBRARY
@@ -380,17 +369,6 @@ autoscaling:
 labels:
   app.kubernetes.io/part-of: llmops-platform
   app.kubernetes.io/component: gateway
-
-# ============================================================================
-# VOLUMES
-# ============================================================================
-volumes:
-  - name: root-cache
-    emptyDir: {}
-
-volumeMounts:
-  - name: root-cache
-    mountPath: /root/.cache
 
 # ============================================================================
 # ANNOTATIONS
