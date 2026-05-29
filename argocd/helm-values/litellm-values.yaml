@@ -5,7 +5,7 @@
 # IMAGE CONFIGURATION
 # ============================================================================
 image:
-  repository: ghcr.io/berriai/litellm
+  repository: ghcr.io/berriai/litellm-non_root
   tag: "main-latest"  # Or pin to specific version like "main-v1.0.0"
   pullPolicy: IfNotPresent
 
@@ -104,21 +104,6 @@ env:
 
   - name: JSON_LOGS
     value: "true"
-
-  # Override cache directory using XDG standard
-  - name: XDG_CACHE_HOME
-    value: "/tmp/.cache"
-
-  # Prisma cache configuration - use /tmp for writable cache
-  - name: PRISMA_QUERY_ENGINE_LIBRARY
-    value: "/tmp/prisma-engines"
-
-  - name: PRISMA_ENGINES_MIRROR
-    value: "https://binaries.prisma.sh"
-
-  # Override Prisma binary cache directory
-  - name: PRISMA_BINARY_CACHE_DIR
-    value: "/tmp/.cache/prisma-python"
 
   # Set writable directory for LiteLLM migrations
   - name: LITELLM_MIGRATION_DIR
@@ -334,17 +319,17 @@ readinessProbe:
 # ============================================================================
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1000
+  runAsUser: 65534
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false  # Allow Prisma to write cache files
+  readOnlyRootFilesystem: false
   capabilities:
     drop:
       - ALL
 
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
+  runAsUser: 65534
+  fsGroup: 65534
 
 # ============================================================================
 # POD DISRUPTION BUDGET
