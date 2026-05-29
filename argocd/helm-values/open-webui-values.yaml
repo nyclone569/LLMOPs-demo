@@ -120,8 +120,7 @@ ingress:
     # ALB configuration
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
 
     # Health check
     alb.ingress.kubernetes.io/healthcheck-path: /health
@@ -136,11 +135,9 @@ ingress:
     # Tags
     alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=open-webui"
 
-  host: chat.internal.yourdomain.com
+  host: ""  # Use AWS-provided ALB DNS name
 
-  # TLS: set to true when certificate secret is ready
   tls: false
-  existingSecret: "open-webui-tls"
 
 # ============================================================================
 # HEALTH CHECKS (v14.6.0 schema)

@@ -263,8 +263,7 @@ ingress:
     # ALB configuration
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
 
     # Health check
     alb.ingress.kubernetes.io/healthcheck-path: /health
@@ -280,15 +279,12 @@ ingress:
     alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=litellm"
 
   hosts:
-    - host: gateway.internal.yourdomain.com
+    - host: ""  # Use AWS-provided ALB DNS name
       paths:
         - path: /
           pathType: Prefix
 
-  tls:
-    - secretName: litellm-tls
-      hosts:
-        - gateway.internal.yourdomain.com
+  tls: []
 
 # ============================================================================
 # HEALTH CHECKS

@@ -92,11 +92,10 @@ spec:
             annotations:
               alb.ingress.kubernetes.io/scheme: internal
               alb.ingress.kubernetes.io/target-type: ip
-              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-              alb.ingress.kubernetes.io/ssl-redirect: "443"
+              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
               alb.ingress.kubernetes.io/healthcheck-path: /api/health
             hosts:
-              - grafana.internal.yourdomain.com
+              - ""  # Use AWS-provided ALB DNS name
 
           persistence:
             enabled: true
@@ -239,4 +238,4 @@ spec:
     - name: Description
       value: Prometheus, Grafana, and Alertmanager for platform monitoring
     - name: Grafana URL
-      value: https://grafana.internal.yourdomain.com
+      value: "Use kubectl get ingress -n monitoring for ALB DNS"

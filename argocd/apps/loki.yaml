@@ -91,7 +91,7 @@ spec:
               alb.ingress.kubernetes.io/target-type: ip
               alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
             hosts:
-              - host: loki.internal.yourdomain.com
+              - host: ""  # Use AWS-provided ALB DNS name
                 paths:
                   - path: /
                     pathType: Prefix
@@ -138,4 +138,4 @@ spec:
     - name: Description
       value: Loki for log aggregation and querying
     - name: URL
-      value: https://loki.internal.yourdomain.com
+      value: "Use kubectl get ingress -n loki for ALB DNS"

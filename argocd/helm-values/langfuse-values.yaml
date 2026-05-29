@@ -71,7 +71,7 @@ env:
 
   # Application URL (used for callbacks and links)
   - name: NEXTAUTH_URL
-    value: "https://langfuse.internal.yourdomain.com"
+    value: "http://localhost:3000"  # Update to ALB DNS name after first deploy
 
   # Disable telemetry (internal platform, no phone home)
   - name: TELEMETRY_ENABLED
@@ -132,8 +132,7 @@ ingress:
     # ALB configuration
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
 
     # Health check configuration
     alb.ingress.kubernetes.io/healthcheck-path: /api/public/health
@@ -149,15 +148,12 @@ ingress:
     alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=langfuse"
 
   hosts:
-    - host: langfuse.internal.yourdomain.com
+    - host: ""  # Use AWS-provided ALB DNS name
       paths:
         - path: /
           pathType: Prefix
 
-  tls:
-    - secretName: langfuse-tls
-      hosts:
-        - langfuse.internal.yourdomain.com
+  tls: []
 
 # ============================================================================
 # HEALTH CHECKS
