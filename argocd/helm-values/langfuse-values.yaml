@@ -143,8 +143,8 @@ clickhouse:
   deploy: true
   shards: 1
   replicaCount: 1
-  image:
-    tag: "24.8.10.22-debian-12-r0"
+  clusterEnabled: false
+  resourcesPreset: small
   zookeeper:
     enabled: false
   auth:
