@@ -1,7 +1,10 @@
 global:
   postgresql:
     auth:
-      postgresPassword: "changeme123"
+      existingSecret: llmops-apikeys-secret
+      secretKeys:
+        adminPasswordKey: POSTGRESQL_PASSWORD
+        userPasswordKey: POSTGRESQL_PASSWORD
       database: "postgres"
 
 primary:

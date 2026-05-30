@@ -114,3 +114,8 @@ output "cluster_addons" {
   description = "Map of cluster addon attributes"
   value       = module.eks.cluster_addons
 }
+
+output "vpc_id" {
+  description = "ID of the VPC the cluster is in"
+  value       = data.terraform_remote_state.vpc.outputs.vpc_id
+}

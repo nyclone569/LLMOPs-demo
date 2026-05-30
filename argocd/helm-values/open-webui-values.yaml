@@ -17,6 +17,16 @@ image:
 replicaCount: 2
 
 # ============================================================================
+# AUTOSCALING (HPA)
+# ============================================================================
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ============================================================================
 # RESOURCES
 # ============================================================================
 resources:
@@ -88,6 +98,40 @@ extraEnvVars:
   # Logging
   - name: WEBUI_LOG_LEVEL
     value: "INFO"
+
+  # SSO/OIDC Configuration
+  - name: ENABLE_OAUTH_SIGNUP
+    value: "true"
+
+  - name: OAUTH_PROVIDER_NAME
+    value: "SSO"
+
+  - name: OPENID_PROVIDER_URL
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: OIDC_PROVIDER_URL
+        optional: true
+
+  - name: OAUTH_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: OIDC_CLIENT_ID
+        optional: true
+
+  - name: OAUTH_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: llmops-apikeys-secret
+        key: OIDC_CLIENT_SECRET
+        optional: true
+
+  - name: OAUTH_SCOPES
+    value: "openid email profile"
+
+  - name: ENABLE_LOGIN_FORM
+    value: "true"
 
 # ============================================================================
 # PERSISTENCE

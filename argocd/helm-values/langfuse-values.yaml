@@ -146,10 +146,18 @@ clickhouse:
     existingSecretKey: CLICKHOUSE_PASSWORD
 
 # ============================================================================
-# S3 — deploy bundled MinIO with secret-backed root password
+# S3 — use AWS S3, disable bundled MinIO
 # ============================================================================
 s3:
-  deploy: true
-  auth:
-    existingSecret: llmops-apikeys-secret
-    rootPasswordSecretKey: MINIO_ROOT_PASSWORD
+  deploy: false
+  bucket: llmops-langfuse
+  region: ap-southeast-1
+  forcePathStyle: false
+  accessKeyId:
+    secretKeyRef:
+      name: llmops-apikeys-secret
+      key: LANGFUSE_S3_ACCESS_KEY_ID
+  secretAccessKey:
+    secretKeyRef:
+      name: llmops-apikeys-secret
+      key: LANGFUSE_S3_SECRET_ACCESS_KEY

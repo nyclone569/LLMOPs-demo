@@ -58,17 +58,23 @@ resource "helm_release" "argocd" {
 
   set {
     name  = "server.ingress.annotations.alb\\.ingress\\.kubernetes\\.io/backend-protocol"
-    value = "HTTPS"
+    value = "HTTP"
   }
 
   set {
     name  = "server.ingress.annotations.alb\\.ingress\\.kubernetes\\.io/listen-ports"
-    value = "[{\"HTTPS\":443}]"
+    value = "[{\"HTTP\":80}]"
   }
 
   set {
     name  = "server.ingress.hosts[0]"
     value = var.argocd_ingress_host
+  }
+
+  # Run ArgoCD server without TLS — ALB terminates TLS, forwards HTTP to pod
+  set {
+    name  = "server.insecure"
+    value = "true"
   }
 
   # Enable metrics

@@ -65,6 +65,13 @@ resource "kubernetes_manifest" "external_secret_api_keys" {
             LANGFUSE_SECRET_KEY = "{{ .langfuse_secret_key }}"
             REDIS_PASSWORD      = "{{ .redis_password }}"
             WEBUI_SECRET_KEY    = "{{ .webui_secret_key }}"
+            POSTGRESQL_PASSWORD          = "{{ .postgresql_password }}"
+            CLICKHOUSE_PASSWORD          = "{{ .clickhouse_password }}"
+            LANGFUSE_S3_ACCESS_KEY_ID    = "{{ .langfuse_s3_access_key_id }}"
+            LANGFUSE_S3_SECRET_ACCESS_KEY = "{{ .langfuse_s3_secret_access_key }}"
+            OIDC_PROVIDER_URL            = "{{ .oidc_provider_url }}"
+            OIDC_CLIENT_ID               = "{{ .oidc_client_id }}"
+            OIDC_CLIENT_SECRET           = "{{ .oidc_client_secret }}"
           }
         }
       }

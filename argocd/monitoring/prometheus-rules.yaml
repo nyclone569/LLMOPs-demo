@@ -159,6 +159,34 @@ data:
               summary: "Node {{ $labels.node }} is under {{ $labels.condition }}"
               description: "Node has been under pressure for more than 5 minutes."
 
+          # PostgreSQL high connection usage
+          - alert: PostgreSQLHighConnectionUsage
+            expr: |
+              (
+                sum(pg_stat_activity_count) by (instance)
+                /
+                sum(pg_settings_max_connections) by (instance)
+              ) > 0.80
+            for: 5m
+            labels:
+              severity: warning
+              component: postgresql
+            annotations:
+              summary: "PostgreSQL connection usage above 80%"
+              description: "PostgreSQL is using {{ $value | humanizePercentage }} of max_connections on {{ $labels.instance }}."
+
+          # Langfuse trace ingestion delay
+          - alert: LangfuseIngestionDelayHigh
+            expr: |
+              langfuse_ingestion_delay_seconds > 60
+            for: 5m
+            labels:
+              severity: warning
+              component: langfuse
+            annotations:
+              summary: "Langfuse trace ingestion delay above 60 seconds"
+              description: "Langfuse trace ingestion delay is {{ $value }}s, exceeding the 60 second SLO."
+
       - name: llmops-cost-tracking
         interval: 1h
         rules:

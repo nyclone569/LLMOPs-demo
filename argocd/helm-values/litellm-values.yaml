@@ -115,66 +115,127 @@ env:
 # LiteLLM configuration file (config.yaml)
 config:
   model_list:
-    # OpenAI GPT-4o (primary for general chat)
-    - model_name: gpt-4o
-      litellm_params:
-        model: openai/gpt-4o
-        api_key: os.environ/OPENAI_API_KEY
-        timeout: 300
-        max_retries: 2
-
-    # OpenAI GPT-4o-mini (fast, cost-effective)
-    - model_name: gpt-4o-mini
-      litellm_params:
-        model: openai/gpt-4o-mini
-        api_key: os.environ/OPENAI_API_KEY
-        timeout: 300
-        max_retries: 2
-
-    # Anthropic Claude Sonnet (coding assistant)
-    - model_name: claude-sonnet
-      litellm_params:
-        model: anthropic/claude-sonnet-4-20250514
-        api_key: os.environ/ANTHROPIC_API_KEY
-        timeout: 300
-        max_retries: 2
-
-    # Anthropic Claude Haiku (fast chat)
-    - model_name: claude-haiku
-      litellm_params:
-        model: anthropic/claude-haiku-4-20250228
-        api_key: os.environ/ANTHROPIC_API_KEY
-        timeout: 300
-        max_retries: 2
-
-    # Google Gemini 1.5 Pro (long context)
-    - model_name: gemini-1.5-pro
-      litellm_params:
-        model: gemini/gemini-1.5-pro
-        api_key: os.environ/GEMINI_API_KEY
-        timeout: 300
-        max_retries: 2
-
-    # Google Gemini 1.5 Flash (fast, cost-effective)
-    - model_name: gemini-1.5-flash
+    # Fast Chat - General internal chat (latency-based load balanced)
+    - model_name: fast-chat
       litellm_params:
         model: gemini/gemini-1.5-flash
         api_key: os.environ/GEMINI_API_KEY
-        timeout: 300
-        max_retries: 2
+      model_info:
+        mode: chat
+        supports_function_calling: true
+
+    - model_name: fast-chat
+      litellm_params:
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: fast-chat
+      litellm_params:
+        model: claude-haiku-4-20250228
+        api_key: os.environ/ANTHROPIC_API_KEY
+      model_info:
+        mode: chat
+
+    # Coding Assistant - Engineering and code review
+    - model_name: coding-assistant
+      litellm_params:
+        model: gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+        supports_function_calling: true
+
+    - model_name: coding-assistant
+      litellm_params:
+        model: claude-sonnet-4-20250514
+        api_key: os.environ/ANTHROPIC_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: coding-assistant
+      litellm_params:
+        model: gemini/gemini-2.0-flash-exp
+        api_key: os.environ/GEMINI_API_KEY
+      model_info:
+        mode: chat
+
+    # Private Chat - Local models via Ollama in K8s (sensitive data)
+    - model_name: private-chat
+      litellm_params:
+        model: ollama/llama3.2
+        api_base: http://ollama.ollama.svc.cluster.local:11434
+      model_info:
+        mode: chat
+
+    - model_name: private-chat
+      litellm_params:
+        model: ollama/qwen2.5:7b
+        api_base: http://ollama.ollama.svc.cluster.local:11434
+      model_info:
+        mode: chat
+
+    # Long Context - Large document analysis
+    - model_name: long-context
+      litellm_params:
+        model: gemini/gemini-1.5-pro
+        api_key: os.environ/GEMINI_API_KEY
+      model_info:
+        mode: chat
+        max_tokens: 2097152
+
+    - model_name: long-context
+      litellm_params:
+        model: claude-sonnet-4-20250514
+        api_key: os.environ/ANTHROPIC_API_KEY
+      model_info:
+        mode: chat
+        max_tokens: 200000
+
+    # Fallback Model - Backup when primary aliases fail
+    - model_name: fallback-model
+      litellm_params:
+        model: gemini/gemini-1.5-flash
+        api_key: os.environ/GEMINI_API_KEY
+      model_info:
+        mode: chat
+
+  # Router settings for load balancing and fallbacks
+  router_settings:
+    routing_strategy: latency-based-routing
+    num_retries: 2
+    timeout: 60
+    fallbacks:
+      - fast-chat: [fallback-model]
+      - coding-assistant: [fast-chat, fallback-model]
+      - long-context: [fast-chat]
+    allowed_fails: 3
+    cooldown_time: 60
+
+  # Model-specific rate limits and timeouts
+  model_settings:
+    - model_name: coding-assistant
+      litellm_params:
+        rpm: 100
+        max_tokens: 4096
+        temperature: 0.3
+
+    - model_name: long-context
+      litellm_params:
+        rpm: 20
+        timeout: 120
+
+    - model_name: private-chat
+      litellm_params:
+        rpm: 200
+        timeout: 90
 
   # LiteLLM settings
   litellm_settings:
-    # Logging
-    set_verbose: false
-    json_logs: true
-
-    # Callbacks
+    # Callbacks for Langfuse observability
     success_callback: ["langfuse"]
     failure_callback: ["langfuse"]
-
-    # Database logging
-    database_url: os.environ/DATABASE_URL
 
     # Redis caching
     cache: true
@@ -183,66 +244,46 @@ config:
       host: os.environ/REDIS_HOST
       port: os.environ/REDIS_PORT
       password: os.environ/REDIS_PASSWORD
-      ttl: 600  # Cache TTL in seconds (10 minutes)
+      ttl: 3600
 
-    # Rate limiting (global defaults)
-    rpm_limit: 1000
-    tpm_limit: 100000
+    # Logging
+    json_logs: true
 
-    # Fallback models - resilience when primary provider fails
-    fallbacks: [
-      {
-        "gpt-4o": ["claude-sonnet", "gemini-1.5-pro"]
-      },
-      {
-        "claude-sonnet": ["gpt-4o", "gemini-1.5-pro"]
-      },
-      {
-        "gemini-1.5-pro": ["gpt-4o", "claude-sonnet"]
-      },
-      {
-        "gpt-4o-mini": ["claude-haiku", "gemini-1.5-flash"]
-      },
-      {
-        "claude-haiku": ["gpt-4o-mini", "gemini-1.5-flash"]
-      },
-      {
-        "gemini-1.5-flash": ["gpt-4o-mini", "claude-haiku"]
-      }
-    ]
+    # Request handling
+    drop_params: true
+    max_parallel_requests: 100
 
-    # Retry settings
-    num_retries: 2
-    request_timeout: 300
+  # General settings - budget, rate limits, auth
+  general_settings:
+    master_key: os.environ/LITELLM_MASTER_KEY
+    database_url: os.environ/DATABASE_URL
 
-    # Cost tracking
-    track_cost_callback: true
+    # Global rate limits
+    rpm: 1000
+    tpm: 1000000
 
-    # Budget limits per user/team (in USD)
-    budget_duration: "30d"  # Budget resets every 30 days
+    # Budget limits (USD per month, platform-wide)
+    budget_duration: 30d
+    max_budget: 6000
 
-    # Per-model rate limits (more granular than global)
-    model_max_budget: {
-      "gpt-4o": 50.0,           # $50/month per user for GPT-4o
-      "claude-sonnet": 50.0,    # $50/month per user for Claude Sonnet
-      "gemini-1.5-pro": 30.0,   # $30/month per user for Gemini Pro
-      "gpt-4o-mini": 10.0,      # $10/month per user for mini models
-      "claude-haiku": 10.0,
-      "gemini-1.5-flash": 10.0
-    }
-
-    # Per-user budget limits
-    max_budget: 100.0  # $100/month per user default
-
-    # Per-model RPM limits (prevent abuse of expensive models)
-    model_rpm_limit: {
-      "gpt-4o": 20,           # 20 requests/min for expensive models
-      "claude-sonnet": 20,
-      "gemini-1.5-pro": 20,
-      "gpt-4o-mini": 100,     # 100 requests/min for cheaper models
-      "claude-haiku": 100,
-      "gemini-1.5-flash": 100
-    }
+    # Team-based model restrictions are managed via the LiteLLM admin API.
+    # Use POST /team and POST /key with the `models` field to restrict which
+    # aliases each team can access. Example team model allowlists:
+    #
+    # default_team_settings:
+    #   - team_alias: engineering
+    #     models: [coding-assistant, fast-chat, long-context]
+    #   - team_alias: support
+    #     models: [fast-chat]
+    #   - team_alias: product
+    #     models: [fast-chat]
+    #   - team_alias: operations
+    #     models: [fast-chat]
+    #   - team_alias: executives
+    #     models: [fast-chat, long-context]
+    #
+    # Apply via: litellm admin API POST /team/new or PATCH /team
+    # with body: {"team_alias": "<name>", "models": ["<alias>", ...]}
 
 # ============================================================================
 # SERVICE
