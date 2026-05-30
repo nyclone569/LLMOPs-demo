@@ -2,6 +2,17 @@
 # Each policy enforces least-privilege ingress/egress per service role.
 
 ---
+# Ensure ollama and postgresql namespaces exist before applying their NetworkPolicies
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ollama
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgresql
+---
 # Redis: only litellm and langfuse may connect
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -66,10 +66,11 @@ resource "helm_release" "argocd" {
     value = "[{\"HTTP\":80}]"
   }
 
-  set {
-    name  = "server.ingress.hosts[0]"
-    value = var.argocd_ingress_host
-  }
+  # No hostname restriction — accept all requests to the ALB DNS name
+  # set {
+  #   name  = "server.ingress.hosts[0]"
+  #   value = var.argocd_ingress_host
+  # }
 
   # Run ArgoCD server without TLS — ALB terminates TLS, forwards HTTP to pod
   set {

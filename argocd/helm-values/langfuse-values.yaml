@@ -141,6 +141,8 @@ redis:
 # ============================================================================
 clickhouse:
   deploy: true
+  image:
+    tag: "24.8.10.22-debian-12-r0"
   auth:
     existingSecret: llmops-apikeys-secret
     existingSecretKey: CLICKHOUSE_PASSWORD
