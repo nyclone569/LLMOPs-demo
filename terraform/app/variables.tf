@@ -21,37 +21,6 @@ variable "environment" {
   }
 }
 
-# ElastiCache Redis Configuration
-variable "redis_node_type" {
-  description = "ElastiCache Redis node type"
-  type        = string
-  default     = "cache.t3.micro"
-}
-
-variable "redis_num_cache_nodes" {
-  description = "Number of cache nodes"
-  type        = number
-  default     = 1
-}
-
-variable "redis_engine_version" {
-  description = "Redis engine version"
-  type        = string
-  default     = "7.0"
-}
-
-variable "redis_parameter_group_family" {
-  description = "Redis parameter group family"
-  type        = string
-  default     = "redis7"
-}
-
-variable "redis_port" {
-  description = "Redis port"
-  type        = number
-  default     = 6379
-}
-
 # External Secrets Configuration
 variable "secrets_namespace" {
   description = "Namespace for application secrets"
