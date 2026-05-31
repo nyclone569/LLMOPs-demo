@@ -53,6 +53,10 @@ spec:
       kind: Secret
       jsonPointers:
         - /data
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/volumeName
 
   info:
     - name: Description
