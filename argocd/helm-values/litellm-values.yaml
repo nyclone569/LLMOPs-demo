@@ -131,13 +131,6 @@ config:
       model_info:
         mode: chat
 
-    - model_name: fast-chat
-      litellm_params:
-        model: anthropic/claude-haiku-4-20250228
-        api_key: os.environ/ANTHROPIC_API_KEY
-      model_info:
-        mode: chat
-
     # Coding Assistant - Engineering and code review
     - model_name: coding-assistant
       litellm_params:
@@ -146,13 +139,6 @@ config:
       model_info:
         mode: chat
         supports_function_calling: true
-
-    - model_name: coding-assistant
-      litellm_params:
-        model: anthropic/claude-sonnet-4-20250514
-        api_key: os.environ/ANTHROPIC_API_KEY
-      model_info:
-        mode: chat
 
     - model_name: coding-assistant
       litellm_params:
@@ -184,14 +170,6 @@ config:
       model_info:
         mode: chat
         max_tokens: 2097152
-
-    - model_name: long-context
-      litellm_params:
-        model: anthropic/claude-sonnet-4-20250514
-        api_key: os.environ/ANTHROPIC_API_KEY
-      model_info:
-        mode: chat
-        max_tokens: 200000
 
     # Fallback Model - Backup when primary aliases fail
     - model_name: fallback-model
