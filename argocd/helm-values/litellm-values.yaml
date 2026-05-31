@@ -234,8 +234,8 @@ config:
   # LiteLLM settings
   litellm_settings:
     # Callbacks for Langfuse observability
-    success_callback: ["langfuse"]
-    failure_callback: ["langfuse"]
+    success_callback: ["langfuse", "prometheus"]
+    failure_callback: ["langfuse", "prometheus"]
 
     # Redis caching
     cache: true

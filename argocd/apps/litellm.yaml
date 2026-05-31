@@ -51,10 +51,6 @@ spec:
       jsonPointers:
         - /spec/clusterIP
         - /spec/clusterIPs
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/replicas
     - group: networking.k8s.io
       kind: Ingress
       jsonPointers:
