@@ -1,35 +1,35 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: langfuse
+  name: postgresql
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
-    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: llmops
 
   sources:
-    - repoURL: https://langfuse.github.io/langfuse-k8s
-      chart: langfuse
-      targetRevision: 1.0.0
+    - repoURL: https://charts.bitnami.com/bitnami
+      chart: postgresql
+      targetRevision: 16.4.9
       helm:
-        releaseName: langfuse
+        releaseName: postgresql
         valueFiles:
-          - $values/argocd/helm-values/langfuse-values.yaml
+          - $values/argocd/helm-values/postgresql-values.yaml
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
       ref: values
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
-      path: argocd/manifests
+      path: argocd/external-secrets
       directory:
-        include: "clickhouse.yaml"
+        include: "postgresql-secret.yaml"
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: langfuse
+    namespace: postgresql
 
   syncPolicy:
     automated:
@@ -42,11 +42,11 @@ spec:
       - ServerSideApply=true
 
     retry:
-      limit: 3
+      limit: 5
       backoff:
-        duration: 5s
+        duration: 10s
         factor: 2
-        maxDuration: 3m
+        maxDuration: 5m
 
   ignoreDifferences:
     - group: ""
@@ -54,18 +54,11 @@ spec:
       jsonPointers:
         - /spec/clusterIP
         - /spec/clusterIPs
-    - group: apps
-      kind: Deployment
+    - group: ""
+      kind: Secret
       jsonPointers:
-        - /spec/replicas
-    - group: networking.k8s.io
-      kind: Ingress
-      jsonPointers:
-        - /status
-        - /metadata/annotations/alb.ingress.kubernetes.io~1load-balancer-name
+        - /data
 
   info:
     - name: Description
-      value: Langfuse LLM observability and analytics platform
-    - name: URL
-      value: https://langfuse.internal.yourdomain.com
+      value: PostgreSQL database shared by LiteLLM and Langfuse

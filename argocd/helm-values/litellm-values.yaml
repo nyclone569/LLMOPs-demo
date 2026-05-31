@@ -133,7 +133,7 @@ config:
 
     - model_name: fast-chat
       litellm_params:
-        model: claude-haiku-4-20250228
+        model: anthropic/claude-haiku-4-20250228
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
@@ -149,7 +149,7 @@ config:
 
     - model_name: coding-assistant
       litellm_params:
-        model: claude-sonnet-4-20250514
+        model: anthropic/claude-sonnet-4-20250514
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
@@ -187,7 +187,7 @@ config:
 
     - model_name: long-context
       litellm_params:
-        model: claude-sonnet-4-20250514
+        model: anthropic/claude-sonnet-4-20250514
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat

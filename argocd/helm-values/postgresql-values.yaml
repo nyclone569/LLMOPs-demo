@@ -1,11 +1,11 @@
-global:
-  postgresql:
-    auth:
-      existingSecret: llmops-apikeys-secret
-      secretKeys:
-        adminPasswordKey: POSTGRESQL_PASSWORD
-        userPasswordKey: POSTGRESQL_PASSWORD
-      database: "postgres"
+image:
+  tag: latest
+
+auth:
+  existingSecret: llmops-apikeys-secret
+  secretKeys:
+    adminPasswordKey: POSTGRESQL_PASSWORD
+  database: "postgres"
 
 primary:
   persistence:
@@ -24,10 +24,7 @@ primary:
   initdb:
     scripts:
       init.sql: |
-        -- Create schemas for LiteLLM and Langfuse
         CREATE SCHEMA IF NOT EXISTS litellm;
         CREATE SCHEMA IF NOT EXISTS langfuse;
-
-        -- Grant permissions
         GRANT ALL PRIVILEGES ON SCHEMA litellm TO postgres;
         GRANT ALL PRIVILEGES ON SCHEMA langfuse TO postgres;

@@ -30,19 +30,6 @@ langfuse:
   # ADDITIONAL ENVIRONMENT VARIABLES
   # ============================================================================
   additionalEnv:
-    # Database connection from Supabase cloud PostgreSQL
-    - name: DATABASE_URL
-      valueFrom:
-        secretKeyRef:
-          name: llmops-supabase-secret
-          key: LANGFUSE_DB_URL
-
-    - name: DIRECT_URL
-      valueFrom:
-        secretKeyRef:
-          name: llmops-supabase-secret
-          key: LANGFUSE_DB_URL
-
     # Public key for API access
     - name: LANGFUSE_PUBLIC_KEY
       valueFrom:
@@ -120,10 +107,18 @@ langfuse:
     app.kubernetes.io/component: observability
 
 # ============================================================================
-# DATABASE — use Supabase cloud PostgreSQL, disable built-in
+# DATABASE — in-cluster PostgreSQL (postgresql namespace)
 # ============================================================================
 postgresql:
   deploy: false
+  host: "postgresql-primary.postgresql.svc.cluster.local"
+  port: 5432
+  auth:
+    username: "postgres"
+    existingSecret: "llmops-apikeys-secret"
+    secretKeys:
+      userPasswordKey: "POSTGRESQL_PASSWORD"
+    database: "postgres"
 
 # ============================================================================
 # REDIS — use existing cluster Redis (shared with LiteLLM)
@@ -137,19 +132,17 @@ redis:
     existingSecretPasswordKey: REDIS_PASSWORD
 
 # ============================================================================
-# CLICKHOUSE — deploy bundled ClickHouse with secret-backed password
+# CLICKHOUSE — standalone deployment (bitnami/clickhouse removed from Docker Hub)
+# A separate clickhouse Deployment using clickhouse/clickhouse-server is managed
+# as an additional source in the langfuse ArgoCD app (argocd/manifests/clickhouse.yaml)
 # ============================================================================
 clickhouse:
-  deploy: true
-  shards: 1
-  replicaCount: 1
-  clusterEnabled: false
-  resourcesPreset: small
-  zookeeper:
-    enabled: false
+  deploy: false
+  host: "langfuse-clickhouse"
   auth:
-    existingSecret: llmops-apikeys-secret
-    existingSecretKey: CLICKHOUSE_PASSWORD
+    username: "default"
+    existingSecret: "llmops-apikeys-secret"
+    existingSecretKey: "CLICKHOUSE_PASSWORD"
 
 # ============================================================================
 # S3 — use AWS S3, disable bundled MinIO
