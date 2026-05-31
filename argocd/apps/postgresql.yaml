@@ -11,16 +11,11 @@ spec:
   project: llmops
 
   sources:
-    - repoURL: https://charts.bitnami.com/bitnami
-      chart: postgresql
-      targetRevision: 16.7.27
-      helm:
-        releaseName: postgresql
-        valueFiles:
-          - $values/argocd/helm-values/postgresql-values.yaml
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
-      ref: values
+      path: argocd/manifests
+      directory:
+        include: "postgresql.yaml"
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
       path: argocd/external-secrets

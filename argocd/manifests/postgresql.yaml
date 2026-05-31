@@ -1,0 +1,115 @@
+# Standalone PostgreSQL for LiteLLM and Langfuse
+# Uses bitnami/postgresql:latest (available on Docker Hub unlike version-specific tags)
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-data
+  namespace: postgresql
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-initdb
+  namespace: postgresql
+data:
+  init.sql: |
+    CREATE SCHEMA IF NOT EXISTS litellm;
+    CREATE SCHEMA IF NOT EXISTS langfuse;
+    GRANT ALL PRIVILEGES ON SCHEMA litellm TO postgres;
+    GRANT ALL PRIVILEGES ON SCHEMA langfuse TO postgres;
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql-primary
+  namespace: postgresql
+spec:
+  replicas: 1
+  serviceName: postgresql-primary-headless
+  selector:
+    matchLabels:
+      app: postgresql-primary
+  template:
+    metadata:
+      labels:
+        app: postgresql-primary
+    spec:
+      containers:
+        - name: postgresql
+          image: bitnami/postgresql:latest
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          env:
+            - name: POSTGRESQL_DATABASE
+              value: postgres
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmops-apikeys-secret
+                  key: POSTGRESQL_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /bitnami/postgresql
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, postgres]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgresql-data
+        - name: initdb
+          configMap:
+            name: postgresql-initdb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-primary
+  namespace: postgresql
+spec:
+  selector:
+    app: postgresql-primary
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-primary-headless
+  namespace: postgresql
+spec:
+  selector:
+    app: postgresql-primary
+  clusterIP: None
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
