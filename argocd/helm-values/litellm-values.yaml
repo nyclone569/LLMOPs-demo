@@ -118,16 +118,16 @@ config:
     # Fast Chat - General internal chat (latency-based load balanced)
     - model_name: fast-chat
       litellm_params:
-        model: gemini/gemini-1.5-flash
-        api_key: os.environ/GEMINI_API_KEY
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
       model_info:
         mode: chat
         supports_function_calling: true
 
     - model_name: fast-chat
       litellm_params:
-        model: gpt-4o-mini
-        api_key: os.environ/OPENAI_API_KEY
+        model: gemini/gemini-2.0-flash
+        api_key: os.environ/GEMINI_API_KEY
       model_info:
         mode: chat
 
@@ -142,7 +142,7 @@ config:
 
     - model_name: coding-assistant
       litellm_params:
-        model: gemini/gemini-2.0-flash-exp
+        model: gemini/gemini-2.0-flash
         api_key: os.environ/GEMINI_API_KEY
       model_info:
         mode: chat
@@ -165,17 +165,25 @@ config:
     # Long Context - Large document analysis
     - model_name: long-context
       litellm_params:
-        model: gemini/gemini-1.5-pro
+        model: gemini/gemini-2.0-flash
         api_key: os.environ/GEMINI_API_KEY
       model_info:
         mode: chat
-        max_tokens: 2097152
+        max_tokens: 1048576
+
+    - model_name: long-context
+      litellm_params:
+        model: gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+        max_tokens: 128000
 
     # Fallback Model - Backup when primary aliases fail
     - model_name: fallback-model
       litellm_params:
-        model: gemini/gemini-1.5-flash
-        api_key: os.environ/GEMINI_API_KEY
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
       model_info:
         mode: chat
 
