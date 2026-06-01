@@ -42,24 +42,6 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: langfuse
-  namespace: monitoring
-  labels:
-    release: kube-prometheus-stack
-spec:
-  namespaceSelector:
-    matchNames:
-      - langfuse
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: langfuse
-  endpoints:
-    - port: http
-      path: /api/public/metrics
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
   name: postgresql
   namespace: monitoring
   labels:

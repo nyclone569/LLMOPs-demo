@@ -14,9 +14,9 @@ spec:
         - alert: LiteLLMHighErrorRate
           expr: |
             (
-              sum(rate(litellm_request_total{status=~"5.."}[5m]))
+              sum(rate(litellm_deployment_failure_responses_total[5m]))
               /
-              sum(rate(litellm_request_total[5m]))
+              sum(rate(litellm_deployment_total_requests_total[5m]))
             ) > 0.05
           for: 5m
           labels:
@@ -29,9 +29,9 @@ spec:
         - alert: LLMProviderHighTimeoutRate
           expr: |
             (
-              sum(rate(litellm_request_total{error_type="timeout"}[5m]))
+              sum(rate(litellm_deployment_failure_responses_total{exception_class=~".*[Tt]imeout.*"}[5m]))
               /
-              sum(rate(litellm_request_total[5m]))
+              sum(rate(litellm_deployment_total_requests_total[5m]))
             ) > 0.10
           for: 5m
           labels:
@@ -64,7 +64,7 @@ spec:
         - alert: LiteLLMHighLatency
           expr: |
             histogram_quantile(0.95,
-              sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le)
+              sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le)
             ) > 3
           for: 10m
           labels:
@@ -178,7 +178,7 @@ spec:
       rules:
         - alert: DailyLLMCostSpike
           expr: |
-            sum(increase(litellm_total_cost_usd[24h])) > 200
+            sum(increase(litellm_spend_metric_total[24h])) > 200
           labels:
             severity: warning
             component: cost
@@ -189,9 +189,9 @@ spec:
         - alert: UserHighTokenConsumption
           expr: |
             (
-              sum(increase(litellm_tokens_total[24h])) by (user)
+              sum(increase(litellm_total_tokens_metric_total[24h])) by (user)
               /
-              sum(increase(litellm_tokens_total[24h]))
+              sum(increase(litellm_total_tokens_metric_total[24h]))
             ) > 0.30
           labels:
             severity: warning
@@ -214,7 +214,7 @@ spec:
 
         - alert: UnusualRequestPattern
           expr: |
-            rate(litellm_request_total[5m]) > 2 * avg_over_time(rate(litellm_request_total[5m])[1h:5m])
+            rate(litellm_deployment_total_requests_total[5m]) > 2 * avg_over_time(rate(litellm_deployment_total_requests_total[5m])[1h:5m])
           for: 10m
           labels:
             severity: warning

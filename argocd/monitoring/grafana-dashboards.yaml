@@ -25,7 +25,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
           "targets": [
             {
-              "expr": "sum(rate(litellm_request_total[5m]))",
+              "expr": "sum(rate(litellm_deployment_total_requests_total[5m]))",
               "legendFormat": "Total req/s"
             }
           ],
@@ -40,7 +40,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
           "targets": [
             {
-              "expr": "sum(rate(litellm_request_total{status=~\"5..\"}[5m])) / sum(rate(litellm_request_total[5m]))",
+              "expr": "sum(rate(litellm_deployment_failure_responses_total[5m])) / sum(rate(litellm_deployment_total_requests_total[5m]))",
               "legendFormat": "Error Rate"
             }
           ],
@@ -55,11 +55,11 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
           "targets": [
             {
-              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
               "legendFormat": "P95"
             },
             {
-              "expr": "histogram_quantile(0.50, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.50, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
               "legendFormat": "P50"
             }
           ],
@@ -74,8 +74,8 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
           "targets": [
             {
-              "expr": "sum(rate(litellm_request_total[5m])) by (model)",
-              "legendFormat": "{{ model }}"
+              "expr": "sum(rate(litellm_deployment_total_requests_total[5m])) by (litellm_model_name)",
+              "legendFormat": "{{ litellm_model_name }}"
             }
           ],
           "fieldConfig": {
@@ -89,8 +89,8 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
           "targets": [
             {
-              "expr": "sum(rate(litellm_request_total[5m])) by (custom_llm_provider)",
-              "legendFormat": "{{ custom_llm_provider }}"
+              "expr": "sum(rate(litellm_deployment_total_requests_total[5m])) by (api_provider)",
+              "legendFormat": "{{ api_provider }}"
             }
           ],
           "fieldConfig": {
@@ -104,8 +104,8 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
           "targets": [
             {
-              "expr": "sum(rate(litellm_request_total{status=\"200\"}[5m])) by (custom_llm_provider) / sum(rate(litellm_request_total[5m])) by (custom_llm_provider)",
-              "legendFormat": "{{ custom_llm_provider }}"
+              "expr": "sum(rate(litellm_deployment_success_responses_total[5m])) by (api_provider) / sum(rate(litellm_deployment_total_requests_total[5m])) by (api_provider)",
+              "legendFormat": "{{ api_provider }}"
             }
           ],
           "fieldConfig": {
@@ -119,7 +119,7 @@ data:
           "gridPos": {"h": 4, "w": 8, "x": 0, "y": 24},
           "targets": [
             {
-              "expr": "sum(increase(litellm_tokens_total[24h]))",
+              "expr": "sum(increase(litellm_total_tokens_metric_total[24h]))",
               "legendFormat": "Tokens (24h)"
             }
           ],
@@ -134,7 +134,7 @@ data:
           "gridPos": {"h": 4, "w": 8, "x": 8, "y": 24},
           "targets": [
             {
-              "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+              "expr": "sum(increase(litellm_spend_metric_total[24h]))",
               "legendFormat": "Cost (24h)"
             }
           ],
@@ -227,8 +227,8 @@ data:
           "gridPos": {"h": 10, "w": 12, "x": 0, "y": 0},
           "targets": [
             {
-              "expr": "sum(increase(litellm_total_cost_usd[24h])) by (model)",
-              "legendFormat": "{{ model }}"
+              "expr": "sum(increase(litellm_spend_metric_total[24h])) by (litellm_model_name)",
+              "legendFormat": "{{ litellm_model_name }}"
             }
           ],
           "fieldConfig": {
@@ -242,8 +242,8 @@ data:
           "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
           "targets": [
             {
-              "expr": "sum(increase(litellm_total_cost_usd[24h])) by (team)",
-              "legendFormat": "{{ team }}"
+              "expr": "sum(increase(litellm_spend_metric_total[24h])) by (team_alias)",
+              "legendFormat": "{{ team_alias }}"
             }
           ],
           "fieldConfig": {
@@ -257,7 +257,7 @@ data:
           "gridPos": {"h": 10, "w": 12, "x": 0, "y": 10},
           "targets": [
             {
-              "expr": "topk(10, sum(increase(litellm_total_cost_usd[24h])) by (user))",
+              "expr": "topk(10, sum(increase(litellm_spend_metric_total[24h])) by (user))",
               "legendFormat": "{{ user }}"
             }
           ],
@@ -272,8 +272,8 @@ data:
           "gridPos": {"h": 10, "w": 12, "x": 12, "y": 10},
           "targets": [
             {
-              "expr": "sum(increase(litellm_tokens_total[24h])) by (model)",
-              "legendFormat": "{{ model }}"
+              "expr": "sum(increase(litellm_total_tokens_metric_total[24h])) by (litellm_model_name)",
+              "legendFormat": "{{ litellm_model_name }}"
             }
           ],
           "fieldConfig": {
@@ -287,7 +287,7 @@ data:
           "gridPos": {"h": 8, "w": 16, "x": 0, "y": 20},
           "targets": [
             {
-              "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+              "expr": "sum(increase(litellm_spend_metric_total[24h]))",
               "legendFormat": "Daily Cost"
             }
           ],
@@ -302,7 +302,7 @@ data:
           "gridPos": {"h": 8, "w": 8, "x": 16, "y": 20},
           "targets": [
             {
-              "expr": "sum(increase(litellm_total_cost_usd[24h])) / 200",
+              "expr": "sum(increase(litellm_spend_metric_total[24h])) / 200",
               "legendFormat": "% of $200 budget"
             }
           ],
