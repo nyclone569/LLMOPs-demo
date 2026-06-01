@@ -81,6 +81,8 @@ spec:
               alb.ingress.kubernetes.io/scheme: internal
               alb.ingress.kubernetes.io/target-type: ip
               alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+              alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=loki,Owner=nghiatd,Cluster=llmops-cluster"
+              alb.ingress.kubernetes.io/load-balancer-name: "llmops-loki"
             hosts:
               - host: ""  # Use AWS-provided ALB DNS name
                 paths:

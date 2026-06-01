@@ -90,10 +90,12 @@ spec:
             enabled: true
             ingressClassName: alb
             annotations:
-              alb.ingress.kubernetes.io/scheme: internal
+              alb.ingress.kubernetes.io/scheme: internet-facing
               alb.ingress.kubernetes.io/target-type: ip
               alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
               alb.ingress.kubernetes.io/healthcheck-path: /api/health
+              alb.ingress.kubernetes.io/tags: "Environment=production,Project=llmops,Component=grafana,Owner=nghiatd,Cluster=llmops-cluster"
+              alb.ingress.kubernetes.io/load-balancer-name: "llmops-grafana"
             hosts:
               - ""  # Use AWS-provided ALB DNS name
 
