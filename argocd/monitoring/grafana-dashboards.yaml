@@ -8,202 +8,319 @@ metadata:
 data:
   llmops-overview.json: |
     {
-      "dashboard": {
-        "title": "LLMOps Platform Overview",
-        "tags": ["llmops", "overview"],
-        "timezone": "browser",
-        "panels": [
-          {
-            "title": "LiteLLM Request Rate",
-            "targets": [
-              {
-                "expr": "sum(rate(litellm_request_total[5m]))",
-                "legendFormat": "Requests/sec"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "LiteLLM Error Rate",
-            "targets": [
-              {
-                "expr": "sum(rate(litellm_request_total{status=~\"5..\"}[5m])) / sum(rate(litellm_request_total[5m]))",
-                "legendFormat": "Error Rate"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "LiteLLM P95 Latency",
-            "targets": [
-              {
-                "expr": "histogram_quantile(0.95, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
-                "legendFormat": "P95 Latency"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Requests by Model",
-            "targets": [
-              {
-                "expr": "sum(rate(litellm_request_total[5m])) by (model)",
-                "legendFormat": "{{ model }}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Requests by Provider",
-            "targets": [
-              {
-                "expr": "sum(rate(litellm_request_total[5m])) by (provider)",
-                "legendFormat": "{{ provider }}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Provider Health",
-            "targets": [
-              {
-                "expr": "sum(rate(litellm_request_total{status=\"200\"}[5m])) by (provider) / sum(rate(litellm_request_total[5m])) by (provider)",
-                "legendFormat": "{{ provider }}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Daily Token Usage",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_tokens_total[24h]))",
-                "legendFormat": "Total Tokens"
-              }
-            ],
-            "type": "stat"
-          },
-          {
-            "title": "Daily Cost (USD)",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_total_cost_usd[24h]))",
-                "legendFormat": "Total Cost"
-              }
-            ],
-            "type": "stat"
-          },
-          {
-            "title": "Open WebUI Availability",
-            "targets": [
-              {
-                "expr": "up{job=\"open-webui\"}",
-                "legendFormat": "{{ pod }}"
-              }
-            ],
-            "type": "stat"
-          },
-          {
-            "title": "Langfuse Availability",
-            "targets": [
-              {
-                "expr": "up{job=\"langfuse\"}",
-                "legendFormat": "{{ pod }}"
-              }
-            ],
-            "type": "stat"
-          },
-          {
-            "title": "Redis Memory Usage",
-            "targets": [
-              {
-                "expr": "redis_memory_used_bytes / redis_memory_max_bytes",
-                "legendFormat": "Memory Usage %"
-              }
-            ],
-            "type": "gauge"
-          },
-          {
-            "title": "Pod CPU Usage",
-            "targets": [
-              {
-                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"litellm|langfuse|open-webui\"}[5m])) by (namespace, pod)",
-                "legendFormat": "{{ namespace }}/{{ pod }}"
-              }
-            ],
-            "type": "graph"
+      "id": null,
+      "uid": "llmops-overview",
+      "title": "LLMOps Platform Overview",
+      "tags": ["llmops", "overview"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Request Rate (req/s)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_request_total[5m]))",
+              "legendFormat": "Total req/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps"}
           }
-        ]
-      }
+        },
+        {
+          "id": 2,
+          "title": "Error Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_request_total{status=~\"5..\"}[5m])) / sum(rate(litellm_request_total[5m]))",
+              "legendFormat": "Error Rate"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "percentunit", "max": 1}
+          }
+        },
+        {
+          "id": 3,
+          "title": "P95 Latency (s)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P95"
+            },
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P50"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "s"}
+          }
+        },
+        {
+          "id": 4,
+          "title": "Requests by Model",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_request_total[5m])) by (model)",
+              "legendFormat": "{{ model }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps"}
+          }
+        },
+        {
+          "id": 5,
+          "title": "Requests by Provider",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_request_total[5m])) by (custom_llm_provider)",
+              "legendFormat": "{{ custom_llm_provider }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps"}
+          }
+        },
+        {
+          "id": 6,
+          "title": "Provider Success Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_request_total{status=\"200\"}[5m])) by (custom_llm_provider) / sum(rate(litellm_request_total[5m])) by (custom_llm_provider)",
+              "legendFormat": "{{ custom_llm_provider }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "percentunit", "min": 0, "max": 1}
+          }
+        },
+        {
+          "id": 7,
+          "title": "Daily Token Usage",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 24},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_tokens_total[24h]))",
+              "legendFormat": "Tokens (24h)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "short"}
+          }
+        },
+        {
+          "id": 8,
+          "title": "Daily Cost (USD)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 24},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+              "legendFormat": "Cost (24h)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "currencyUSD"}
+          }
+        },
+        {
+          "id": 9,
+          "title": "Redis Memory Usage",
+          "type": "gauge",
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 24},
+          "targets": [
+            {
+              "expr": "redis_memory_used_bytes / redis_memory_max_bytes",
+              "legendFormat": "Memory %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "percentunit", "min": 0, "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.7},
+                  {"color": "red", "value": 0.85}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "title": "Open WebUI Up",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
+          "targets": [
+            {"expr": "up{job=\"open-webui\"}", "legendFormat": "{{ pod }}"}
+          ],
+          "fieldConfig": {
+            "defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}
+          }
+        },
+        {
+          "id": 11,
+          "title": "Langfuse Up",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28},
+          "targets": [
+            {"expr": "up{job=\"langfuse\"}", "legendFormat": "{{ pod }}"}
+          ],
+          "fieldConfig": {
+            "defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}
+          }
+        },
+        {
+          "id": 12,
+          "title": "Pod CPU Usage",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"litellm|langfuse|open-webui\", container!=\"\"}[5m])) by (namespace, pod)",
+              "legendFormat": "{{ namespace }}/{{ pod }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "cores"}
+          }
+        }
+      ]
     }
 
   llmops-cost-analysis.json: |
     {
-      "dashboard": {
-        "title": "LLMOps Cost Analysis",
-        "tags": ["llmops", "cost"],
-        "timezone": "browser",
-        "panels": [
-          {
-            "title": "Cost by Model (24h)",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_total_cost_usd[24h])) by (model)",
-                "legendFormat": "{{ model }}"
-              }
-            ],
-            "type": "piechart"
-          },
-          {
-            "title": "Cost by User (24h)",
-            "targets": [
-              {
-                "expr": "topk(10, sum(increase(litellm_total_cost_usd[24h])) by (user))",
-                "legendFormat": "{{ user }}"
-              }
-            ],
-            "type": "bargraph"
-          },
-          {
-            "title": "Cost by Team (24h)",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_total_cost_usd[24h])) by (team)",
-                "legendFormat": "{{ team }}"
-              }
-            ],
-            "type": "piechart"
-          },
-          {
-            "title": "Token Usage by Model (24h)",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_tokens_total[24h])) by (model)",
-                "legendFormat": "{{ model }}"
-              }
-            ],
-            "type": "bargraph"
-          },
-          {
-            "title": "Cost Trend (7d)",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_total_cost_usd[24h]))",
-                "legendFormat": "Daily Cost"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Budget Utilization",
-            "targets": [
-              {
-                "expr": "sum(increase(litellm_total_cost_usd[24h])) / 200",
-                "legendFormat": "% of $200 budget"
-              }
-            ],
-            "type": "gauge"
+      "id": null,
+      "uid": "llmops-cost",
+      "title": "LLMOps Cost Analysis",
+      "tags": ["llmops", "cost"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "5m",
+      "time": {"from": "now-24h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Cost by Model (24h)",
+          "type": "piechart",
+          "gridPos": {"h": 10, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_cost_usd[24h])) by (model)",
+              "legendFormat": "{{ model }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "currencyUSD"}
           }
-        ]
-      }
+        },
+        {
+          "id": 2,
+          "title": "Cost by Team (24h)",
+          "type": "piechart",
+          "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_cost_usd[24h])) by (team)",
+              "legendFormat": "{{ team }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "currencyUSD"}
+          }
+        },
+        {
+          "id": 3,
+          "title": "Top 10 Users by Cost (24h)",
+          "type": "barchart",
+          "gridPos": {"h": 10, "w": 12, "x": 0, "y": 10},
+          "targets": [
+            {
+              "expr": "topk(10, sum(increase(litellm_total_cost_usd[24h])) by (user))",
+              "legendFormat": "{{ user }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "currencyUSD"}
+          }
+        },
+        {
+          "id": 4,
+          "title": "Token Usage by Model (24h)",
+          "type": "barchart",
+          "gridPos": {"h": 10, "w": 12, "x": 12, "y": 10},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_tokens_total[24h])) by (model)",
+              "legendFormat": "{{ model }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "short"}
+          }
+        },
+        {
+          "id": 5,
+          "title": "Daily Cost Trend (7d)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 20},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_cost_usd[24h]))",
+              "legendFormat": "Daily Cost"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "currencyUSD"}
+          }
+        },
+        {
+          "id": 6,
+          "title": "Budget Utilization",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 20},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_cost_usd[24h])) / 200",
+              "legendFormat": "% of $200 budget"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.7},
+                  {"color": "red", "value": 0.9}
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
