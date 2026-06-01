@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+LiteLLM Team RBAC Setup
+Creates teams with per-team model access restrictions via the LiteLLM admin API.
+Run once after LiteLLM is healthy; idempotent (existing teams are updated).
+"""
+
+import os
+import sys
+import json
+import logging
+import requests
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
+LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm.litellm.svc.cluster.local:4000")
+LITELLM_API_KEY  = os.environ.get("LITELLM_API_KEY", "sk-1234")
+
+HEADERS = {
+    "Authorization": f"Bearer {LITELLM_API_KEY}",
+    "Content-Type":  "application/json",
+}
+
+# Team definitions: model access + monthly budget
+TEAMS = [
+    {
+        "team_alias": "engineering",
+        "models":     ["coding-assistant", "fast-chat", "long-context", "private-chat"],
+        "max_budget": 100.0,
+        "budget_duration": "monthly",
+        "tpm_limit":  500000,
+        "rpm_limit":  500,
+        "metadata":   {"description": "Engineering team - full model access"},
+    },
+    {
+        "team_alias": "product",
+        "models":     ["fast-chat"],
+        "max_budget": 30.0,
+        "budget_duration": "monthly",
+        "tpm_limit":  100000,
+        "rpm_limit":  100,
+        "metadata":   {"description": "Product team - fast-chat only"},
+    },
+    {
+        "team_alias": "support",
+        "models":     ["fast-chat"],
+        "max_budget": 40.0,
+        "budget_duration": "monthly",
+        "tpm_limit":  150000,
+        "rpm_limit":  150,
+        "metadata":   {"description": "Support team - fast-chat only"},
+    },
+    {
+        "team_alias": "operations",
+        "models":     ["fast-chat"],
+        "max_budget": 20.0,
+        "budget_duration": "monthly",
+        "tpm_limit":  80000,
+        "rpm_limit":  80,
+        "metadata":   {"description": "Operations team - fast-chat only"},
+    },
+    {
+        "team_alias": "executives",
+        "models":     ["fast-chat", "long-context"],
+        "max_budget": 10.0,
+        "budget_duration": "monthly",
+        "tpm_limit":  50000,
+        "rpm_limit":  50,
+        "metadata":   {"description": "Executives - fast-chat and long-context"},
+    },
+]
+
+
+def list_teams() -> dict:
+    """Return existing teams keyed by alias."""
+    resp = requests.get(f"{LITELLM_BASE_URL}/team/list", headers=HEADERS, timeout=10)
+    if resp.status_code != 200:
+        log.error("Failed to list teams: %d %s", resp.status_code, resp.text)
+        return {}
+    data = resp.json()
+    teams = data if isinstance(data, list) else data.get("teams", [])
+    return {t.get("team_alias") or t.get("team_id"): t for t in teams}
+
+
+def create_team(team: dict) -> bool:
+    resp = requests.post(f"{LITELLM_BASE_URL}/team/new", headers=HEADERS,
+                         json=team, timeout=10)
+    if resp.status_code in (200, 201):
+        log.info("Created team: %s", team["team_alias"])
+        return True
+    log.error("Failed to create %s: %d %s", team["team_alias"], resp.status_code, resp.text)
+    return False
+
+
+def update_team(team_id: str, team: dict) -> bool:
+    payload = {**team, "team_id": team_id}
+    resp = requests.post(f"{LITELLM_BASE_URL}/team/update", headers=HEADERS,
+                         json=payload, timeout=10)
+    if resp.status_code == 200:
+        log.info("Updated team: %s", team["team_alias"])
+        return True
+    log.error("Failed to update %s: %d %s", team["team_alias"], resp.status_code, resp.text)
+    return False
+
+
+def main():
+    log.info("Connecting to LiteLLM at %s", LITELLM_BASE_URL)
+
+    # Health check
+    try:
+        resp = requests.get(f"{LITELLM_BASE_URL}/health/liveliness", timeout=5)
+        if resp.status_code != 200:
+            log.error("LiteLLM not healthy: %d", resp.status_code)
+            sys.exit(1)
+    except Exception as e:
+        log.error("Cannot reach LiteLLM: %s", e)
+        sys.exit(1)
+
+    existing = list_teams()
+    log.info("Found %d existing teams: %s", len(existing), list(existing.keys()))
+
+    created = updated = failed = 0
+    for team in TEAMS:
+        alias = team["team_alias"]
+        if alias in existing:
+            tid = existing[alias].get("team_id", alias)
+            if update_team(tid, team):
+                updated += 1
+            else:
+                failed += 1
+        else:
+            if create_team(team):
+                created += 1
+            else:
+                failed += 1
+
+    log.info("Done: %d created, %d updated, %d failed", created, updated, failed)
+    if failed:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

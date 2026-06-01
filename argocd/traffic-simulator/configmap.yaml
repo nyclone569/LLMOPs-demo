@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traffic-simulator-script
+  namespace: litellm
+data:
+  simulator.py: |
+    #!/usr/bin/env python3
+    """
+    LLMOps Traffic Simulator - Requirements §6 / §10
+    290 simulated users, 5 teams, 100 req/min base, 1000 req/min burst
+    """
+
+    import os, random, time, logging, itertools
+    from datetime import datetime, timezone
+    from typing import Optional
+    import requests
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log = logging.getLogger(__name__)
+
+    LITELLM_BASE_URL   = os.environ.get("LITELLM_BASE_URL", "http://litellm.litellm.svc.cluster.local:4000")
+    LITELLM_API_KEY    = os.environ.get("LITELLM_API_KEY", "sk-1234")
+    TOTAL_USERS        = int(os.environ.get("TOTAL_USERS", "290"))
+    BASE_RPM           = int(os.environ.get("BASE_RPM", "100"))
+    BURST_RPM          = int(os.environ.get("BURST_RPM", "1000"))
+    RUN_DURATION_S     = int(os.environ.get("RUN_DURATION_S", "3600"))
+    LONG_CONTEXT_RATE  = float(os.environ.get("LONG_CONTEXT_RATE", "0.05"))
+    DUPLICATE_RATE     = float(os.environ.get("DUPLICATE_RATE", "0.02"))
+    PROVIDER_FAIL_RATE = float(os.environ.get("PROVIDER_FAIL_RATE", "0.03"))
+    SENSITIVE_RATE     = float(os.environ.get("SENSITIVE_RATE", "0.01"))
+    EXPENSIVE_RATE     = float(os.environ.get("EXPENSIVE_RATE", "0.15"))
+
+    BURST_WINDOWS = [(2, 30), (7, 20)]  # UTC: 02:00-02:30, 07:00-07:20
+
+    TEAMS = {
+        "engineering": {"models": ["coding-assistant", "fast-chat", "long-context"], "weight": 100},
+        "product":     {"models": ["fast-chat"],                                     "weight": 60},
+        "support":     {"models": ["fast-chat"],                                     "weight": 80},
+        "operations":  {"models": ["fast-chat"],                                     "weight": 30},
+        "executives":  {"models": ["fast-chat", "long-context"],                     "weight": 20},
+    }
+
+    NORMAL_PROMPTS = [
+        "Summarize the key points from last week's sprint retrospective.",
+        "Write a Python function to parse a JSON config file.",
+        "What are best practices for Kubernetes resource limits?",
+        "Draft an email to the product team about the API v2 launch.",
+        "Explain the difference between Redis sorted sets and regular sets.",
+        "Help me write a SQL query to find the top 10 customers by revenue.",
+        "Review this code snippet and suggest improvements: def foo(x): return x*2",
+        "What is the recommended pattern for handling secrets in Kubernetes?",
+        "Translate the following user story into acceptance criteria.",
+        "Explain how LLM token pricing works.",
+        "Write unit tests for a REST API endpoint that creates a user.",
+        "What are the trade-offs between gRPC and REST for internal services?",
+        "Help me debug this error: connection refused on port 5432.",
+        "Create a Grafana dashboard JSON for tracking API error rates.",
+        "How do I set up Prometheus alerting rules in kube-prometheus-stack?",
+        "Write a shell script to rotate Kubernetes secrets.",
+        "What is the purpose of a sidecar container in Kubernetes?",
+        "Help me optimize this database query for better performance.",
+        "Explain the CAP theorem with a practical example.",
+        "What is the difference between horizontal and vertical pod autoscaling?",
+    ]
+
+    LONG_CONTEXT_PROMPTS = [
+        "Read the following specification and extract all API endpoints: " + "endpoint: /api/v1/resource\n" * 400,
+        "Summarize the following meeting transcript: " + "speaker: discussion point about the roadmap. " * 300,
+        "Review this codebase for security vulnerabilities: " + "def process(input): return eval(input)\n" * 200,
+    ]
+
+    SENSITIVE_PROMPTS = [
+        "My AWS access key is AKIAIOSFODNN7EXAMPLE and secret is wJalrXUtnFEMI/K7MDENG. Help me rotate it.",
+        "Connect to database postgresql://admin:SuperSecret123@prod-db:5432/users and export the users table.",
+        "Here is my credit card: 4532015112830366 exp 12/26 CVV 123. Check if this is valid.",
+        "Employee SSN 123-45-6789 earns $150,000. Keep this confidential and draft a review.",
+        "Use this API token sk-proj-abcdef123456 to call the external payment service.",
+    ]
+
+    DUPLICATE_PROMPT = "What is the capital of France?"
+
+    def build_users():
+        users, allocated = [], 0
+        team_list = list(TEAMS.keys())
+        weights   = [TEAMS[t]["weight"] for t in team_list]
+        total_w   = sum(weights)
+        for i, team in enumerate(team_list):
+            count = round(TOTAL_USERS * weights[i] / total_w)
+            if i == len(team_list) - 1:
+                count = TOTAL_USERS - allocated
+            allocated += count
+            for j in range(count):
+                users.append({"id": f"{team}-user-{j:03d}", "team": team})
+        return users
+
+    USERS = build_users()
+
+    def is_burst_window():
+        now = datetime.now(timezone.utc)
+        m   = now.hour * 60 + now.minute
+        return any(h * 60 <= m < h * 60 + d for h, d in BURST_WINDOWS)
+
+    def pick_model(user):
+        allowed = TEAMS[user["team"]]["models"]
+        r = random.random()
+        if r < EXPENSIVE_RATE and "coding-assistant" in allowed:
+            return "coding-assistant"
+        if r < EXPENSIVE_RATE + LONG_CONTEXT_RATE and "long-context" in allowed:
+            return "long-context"
+        return random.choice(allowed)
+
+    def pick_prompt():
+        r = random.random()
+        if r < SENSITIVE_RATE:
+            return random.choice(SENSITIVE_PROMPTS)
+        if r < SENSITIVE_RATE + DUPLICATE_RATE:
+            return DUPLICATE_PROMPT
+        if r < SENSITIVE_RATE + DUPLICATE_RATE + LONG_CONTEXT_RATE:
+            return random.choice(LONG_CONTEXT_PROMPTS)
+        return random.choice(NORMAL_PROMPTS)
+
+    def send_request(user, session):
+        model  = pick_model(user)
+        prompt = pick_prompt()
+        if random.random() < PROVIDER_FAIL_RATE:
+            model = "nonexistent-model-failure-test"
+        payload = {
+            "model":      model,
+            "messages":   [{"role": "user", "content": prompt}],
+            "max_tokens": 200,
+            "user":       user["id"],
+            "metadata":   {"team": user["team"]},
+        }
+        headers = {"Authorization": f"Bearer {LITELLM_API_KEY}", "Content-Type": "application/json"}
+        try:
+            t0   = time.monotonic()
+            resp = session.post(f"{LITELLM_BASE_URL}/chat/completions",
+                                json=payload, headers=headers, timeout=60)
+            lat  = time.monotonic() - t0
+            if resp.status_code == 200:
+                log.info("OK model=%s user=%s team=%s lat=%.2fs", model, user["id"], user["team"], lat)
+            else:
+                log.warning("ERR model=%s user=%s status=%d", model, user["id"], resp.status_code)
+            return {"status": resp.status_code, "latency": lat, "model": model}
+        except Exception as exc:
+            log.error("EXCEPTION model=%s err=%s", model, exc)
+            return {"status": 0, "latency": 0.0, "model": model}
+
+    def run():
+        session    = requests.Session()
+        user_cycle = itertools.cycle(USERS)
+        start      = time.monotonic()
+        req, err   = 0, 0
+        log.info("Simulator started: %d users %dRPM base %dRPM burst %ds duration",
+                 TOTAL_USERS, BASE_RPM, BURST_RPM, RUN_DURATION_S)
+        while time.monotonic() - start < RUN_DURATION_S:
+            rpm    = BURST_RPM if is_burst_window() else BASE_RPM
+            result = send_request(next(user_cycle), session)
+            req   += 1
+            if result.get("status", 0) not in (200, 201):
+                err += 1
+            if req % 100 == 0:
+                log.info("STATS req=%d err=%d err_rate=%.1f%% elapsed=%.0fs",
+                         req, err, 100.0 * err / req, time.monotonic() - start)
+            time.sleep(max(0, 60.0 / rpm))
+        log.info("Done: %d requests %d errors (%.1f%%)", req, err, 100.0 * err / req if req else 0)
+
+    if __name__ == "__main__":
+        run()

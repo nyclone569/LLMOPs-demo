@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rbac-setup-script
+  namespace: litellm
+data:
+  setup-teams.py: |
+    #!/usr/bin/env python3
+    import os, sys, logging, requests
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log = logging.getLogger(__name__)
+    LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm.litellm.svc.cluster.local:4000")
+    LITELLM_API_KEY  = os.environ.get("LITELLM_API_KEY", "sk-1234")
+    HEADERS = {"Authorization": f"Bearer {LITELLM_API_KEY}", "Content-Type": "application/json"}
+    TEAMS = [
+      {"team_alias": "engineering", "models": ["coding-assistant","fast-chat","long-context","private-chat"],
+       "max_budget": 100.0, "budget_duration": "monthly", "tpm_limit": 500000, "rpm_limit": 500},
+      {"team_alias": "product",     "models": ["fast-chat"],
+       "max_budget": 30.0,  "budget_duration": "monthly", "tpm_limit": 100000, "rpm_limit": 100},
+      {"team_alias": "support",     "models": ["fast-chat"],
+       "max_budget": 40.0,  "budget_duration": "monthly", "tpm_limit": 150000, "rpm_limit": 150},
+      {"team_alias": "operations",  "models": ["fast-chat"],
+       "max_budget": 20.0,  "budget_duration": "monthly", "tpm_limit":  80000, "rpm_limit":  80},
+      {"team_alias": "executives",  "models": ["fast-chat","long-context"],
+       "max_budget": 10.0,  "budget_duration": "monthly", "tpm_limit":  50000, "rpm_limit":  50},
+    ]
+    def list_teams():
+      r = requests.get(f"{LITELLM_BASE_URL}/team/list", headers=HEADERS, timeout=10)
+      if r.status_code != 200: return {}
+      d = r.json()
+      teams = d if isinstance(d, list) else d.get("teams", [])
+      return {t.get("team_alias") or t.get("team_id"): t for t in teams}
+    def upsert_team(team, existing):
+      alias = team["team_alias"]
+      if alias in existing:
+        tid = existing[alias].get("team_id", alias)
+        r = requests.post(f"{LITELLM_BASE_URL}/team/update", headers=HEADERS,
+                          json={**team, "team_id": tid}, timeout=10)
+        verb = "updated"
+      else:
+        r = requests.post(f"{LITELLM_BASE_URL}/team/new", headers=HEADERS, json=team, timeout=10)
+        verb = "created"
+      if r.status_code in (200,201): log.info("%s %s", verb, alias)
+      else: log.error("FAILED %s %s: %d %s", verb, alias, r.status_code, r.text[:200]); return False
+      return True
+    def main():
+      try:
+        r = requests.get(f"{LITELLM_BASE_URL}/health/liveliness", timeout=5)
+        if r.status_code != 200: log.error("LiteLLM unhealthy"); sys.exit(1)
+      except Exception as e: log.error("Cannot reach LiteLLM: %s", e); sys.exit(1)
+      existing = list_teams()
+      log.info("Existing teams: %s", list(existing.keys()))
+      results = [upsert_team(t, existing) for t in TEAMS]
+      failed = results.count(False)
+      log.info("Done: %d ok, %d failed", len(results)-failed, failed)
+      if failed: sys.exit(1)
+    if __name__ == "__main__": main()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rbac-setup
+  namespace: litellm
+  labels:
+    app.kubernetes.io/name: rbac-setup
+    app.kubernetes.io/part-of: llmops-platform
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rbac-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: setup
+          image: python:3.12-slim
+          command:
+            - /bin/sh
+            - -c
+            - pip install requests --quiet && python /app/setup-teams.py
+          env:
+            - name: LITELLM_BASE_URL
+              value: "http://litellm.litellm.svc.cluster.local:4000"
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: LITELLM_MASTER_KEY
+                  optional: true
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+      volumes:
+        - name: script
+          configMap:
+            name: rbac-setup-script
+            defaultMode: 0755
