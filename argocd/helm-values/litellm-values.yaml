@@ -187,6 +187,42 @@ config:
       model_info:
         mode: chat
 
+    # Individual models - selectable directly in Open WebUI
+    - model_name: gpt-4o
+      litellm_params:
+        model: gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: gpt-4o-mini
+      litellm_params:
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: gemini-2.0-flash
+      litellm_params:
+        model: gemini/gemini-2.0-flash
+        api_key: os.environ/GEMINI_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: llama3.2
+      litellm_params:
+        model: ollama/llama3.2
+        api_base: http://ollama.ollama.svc.cluster.local:11434
+      model_info:
+        mode: chat
+
+    - model_name: qwen2.5:7b
+      litellm_params:
+        model: ollama/qwen2.5:7b
+        api_base: http://ollama.ollama.svc.cluster.local:11434
+      model_info:
+        mode: chat
+
   # Router settings for load balancing and fallbacks
   router_settings:
     routing_strategy: latency-based-routing
