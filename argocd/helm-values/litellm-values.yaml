@@ -152,13 +152,7 @@ config:
       litellm_params:
         model: ollama/llama3.2
         api_base: http://ollama.ollama.svc.cluster.local:11434
-      model_info:
-        mode: chat
-
-    - model_name: private-chat
-      litellm_params:
-        model: ollama/qwen2.5:7b
-        api_base: http://ollama.ollama.svc.cluster.local:11434
+        timeout: 300
       model_info:
         mode: chat
 
@@ -216,13 +210,6 @@ config:
       model_info:
         mode: chat
 
-    - model_name: qwen2.5:7b
-      litellm_params:
-        model: ollama/qwen2.5:7b
-        api_base: http://ollama.ollama.svc.cluster.local:11434
-      model_info:
-        mode: chat
-
   # Router settings for load balancing and fallbacks
   router_settings:
     routing_strategy: latency-based-routing
@@ -250,8 +237,8 @@ config:
 
     - model_name: private-chat
       litellm_params:
-        rpm: 200
-        timeout: 90
+        rpm: 10
+        timeout: 300
 
   # LiteLLM settings
   litellm_settings:

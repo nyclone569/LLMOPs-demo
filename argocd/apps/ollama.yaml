@@ -25,7 +25,6 @@ spec:
           models:
             pull:
               - llama3.2
-              - qwen2.5:7b
 
         persistentVolume:
           enabled: true
@@ -34,11 +33,11 @@ spec:
 
         resources:
           requests:
-            cpu: "500m"
-            memory: "2Gi"
+            cpu: "1000m"
+            memory: "4Gi"
           limits:
-            cpu: "2000m"
-            memory: "8Gi"
+            cpu: "1900m"
+            memory: "6Gi"
 
         service:
           type: ClusterIP
