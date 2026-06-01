@@ -89,9 +89,9 @@ spec:
             - name: LITELLM_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: litellm-env
+                  name: llmops-apikeys-secret
                   key: LITELLM_MASTER_KEY
-                  optional: true
+                  optional: false
           volumeMounts:
             - name: script
               mountPath: /app
