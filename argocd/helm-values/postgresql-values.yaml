@@ -28,3 +28,15 @@ primary:
         CREATE SCHEMA IF NOT EXISTS langfuse;
         GRANT ALL PRIVILEGES ON SCHEMA litellm TO postgres;
         GRANT ALL PRIVILEGES ON SCHEMA langfuse TO postgres;
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"

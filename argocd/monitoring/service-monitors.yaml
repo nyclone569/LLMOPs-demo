@@ -1,0 +1,76 @@
+---
+# ServiceMonitor for LiteLLM
+# Scrapes /metrics on port 4000 in the litellm namespace.
+# Pod annotations (prometheus.io/scrape: "true") are already set; this
+# ServiceMonitor makes Prometheus pick it up via the operator instead.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: litellm
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - litellm
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  endpoints:
+    - port: http
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - redis
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: langfuse
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - langfuse
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse
+  endpoints:
+    - port: http
+      path: /api/public/metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgresql
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - postgresql
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+  endpoints:
+    - port: metrics
+      path: /metrics

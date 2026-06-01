@@ -324,3 +324,102 @@ data:
         }
       ]
     }
+
+  llmops-analytics.json: |
+    {
+      "id": null,
+      "uid": "llmops-analytics",
+      "title": "LLMOps Feature Analytics",
+      "tags": ["llmops", "analytics"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "5m",
+      "time": {"from": "now-24h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Requests per User (24h)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_proxy_total_requests_metric_total[24h])) by (user)",
+              "legendFormat": "{{ user }}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Tokens per User (24h)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_tokens_metric_total[24h])) by (user)",
+              "legendFormat": "{{ user }}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Cost per Team (7d)",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_spend_metric_total[7d])) by (team_alias)",
+              "legendFormat": "{{ team_alias }}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Model Error Rate (1h)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_deployment_failure_responses_total[1h])) by (litellm_model_name) / sum(rate(litellm_deployment_total_requests_total[1h])) by (litellm_model_name)",
+              "legendFormat": "{{ litellm_model_name }}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Provider P95 Latency (1h)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_llm_api_latency_metric_bucket[1h])) by (le, api_provider))",
+              "legendFormat": "{{ api_provider }}"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Expensive Model Ratio per Team (24h)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_deployment_total_requests_total{litellm_model_name=~\"coding-assistant|long-context\"}[24h])) by (team_alias) / sum(increase(litellm_deployment_total_requests_total[24h])) by (team_alias)",
+              "legendFormat": "{{ team_alias }}"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Sensitive Prompts Detected (24h)",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "targets": [
+            {
+              "expr": "sum(increase(langfuse_sensitive_prompts_total[24h]))",
+              "legendFormat": "Sensitive Prompts"
+            }
+          ]
+        }
+      ]
+    }
