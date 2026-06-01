@@ -14,6 +14,8 @@ spec:
     repoURL: https://github.com/nyclone569/LLMOPs.git
     targetRevision: main
     path: argocd/monitoring
+    directory:
+      exclude: "network-policies.yaml"
 
   destination:
     server: https://kubernetes.default.svc
