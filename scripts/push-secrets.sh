@@ -78,6 +78,10 @@ d = {
     "GEMINI_API_KEY":             os.environ["GEMINI_API_KEY"],
 }
 
+# Always include S3 keys (even empty) — Langfuse chart requires them in the secret
+for k in ("LANGFUSE_S3_ACCESS_KEY_ID", "LANGFUSE_S3_SECRET_ACCESS_KEY"):
+    d[k] = os.environ.get(k, "")
+
 # Include optional OIDC keys only when non-empty
 for k in ("OIDC_PROVIDER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"):
     if os.environ.get(k, "").strip():
