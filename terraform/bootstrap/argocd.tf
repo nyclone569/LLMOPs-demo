@@ -74,7 +74,7 @@ resource "helm_release" "argocd" {
 
   # Run ArgoCD server without TLS — ALB terminates TLS, forwards HTTP to pod
   set {
-    name  = "server.insecure"
+    name  = "configs.params.server\\.insecure"
     value = "true"
   }
 
