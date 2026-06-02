@@ -2,6 +2,57 @@
 # bitnami/clickhouse image is unavailable on Docker Hub — using official image instead.
 # Service name matches what the Langfuse chart auto-generates (langfuse-clickhouse)
 # so existing CLICKHOUSE_URL/CLICKHOUSE_MIGRATION_URL env vars resolve correctly.
+#
+# keeper.xml enables ClickHouse Keeper (embedded ZooKeeper) so that Langfuse
+# migrations can use "ON CLUSTER default" DDL on a single-node deployment.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-keeper-config
+  namespace: langfuse
+data:
+  keeper.xml: |
+    <clickhouse>
+        <keeper_server>
+            <tcp_port>9181</tcp_port>
+            <server_id>1</server_id>
+            <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+            <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+            <coordination_settings>
+                <operation_timeout_ms>10000</operation_timeout_ms>
+                <session_timeout_ms>30000</session_timeout_ms>
+                <raft_logs_level>warning</raft_logs_level>
+            </coordination_settings>
+            <raft_configuration>
+                <server>
+                    <id>1</id>
+                    <hostname>localhost</hostname>
+                    <port>9234</port>
+                </server>
+            </raft_configuration>
+        </keeper_server>
+        <zookeeper>
+            <node>
+                <host>localhost</host>
+                <port>9181</port>
+            </node>
+        </zookeeper>
+        <macros>
+            <shard>01</shard>
+            <replica>01</replica>
+        </macros>
+        <remote_servers replace="true">
+            <default>
+                <shard>
+                    <replica>
+                        <host>langfuse-clickhouse</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </default>
+        </remote_servers>
+    </clickhouse>
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -52,6 +103,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            - name: keeper-config
+              mountPath: /etc/clickhouse-server/config.d/keeper.xml
+              subPath: keeper.xml
           resources:
             requests:
               cpu: 250m
@@ -77,6 +131,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: clickhouse-data
+        - name: keeper-config
+          configMap:
+            name: clickhouse-keeper-config
 ---
 apiVersion: v1
 kind: Service
