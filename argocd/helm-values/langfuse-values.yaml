@@ -162,7 +162,11 @@ clickhouse:
     existingSecretKey: "CLICKHOUSE_PASSWORD"
 
 # ============================================================================
-# S3 — disabled (not required by platform requirements)
+# S3 — bucket name required by Helm chart schema even when not in use.
+# No credentials provided — Langfuse will not upload blobs but traces work.
 # ============================================================================
 s3:
   deploy: false
+  bucket: llmops-langfuse
+  region: ap-southeast-1
+  forcePathStyle: false
