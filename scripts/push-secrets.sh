@@ -40,8 +40,6 @@ REQUIRED_KEYS=(
   OPENAI_API_KEY
   ANTHROPIC_API_KEY
   GEMINI_API_KEY
-  LANGFUSE_S3_ACCESS_KEY_ID
-  LANGFUSE_S3_SECRET_ACCESS_KEY
   LITELLM_DB_URL
 )
 
@@ -60,7 +58,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "All 14 required keys present."
+echo "All 12 required keys present."
 
 # ── Build JSON for llmops/apikeys ──────────────────────────────────────────────
 APIKEYS_JSON=$(python3 - <<'PYEOF'
@@ -78,8 +76,6 @@ d = {
     "OPENAI_API_KEY":             os.environ["OPENAI_API_KEY"],
     "ANTHROPIC_API_KEY":          os.environ["ANTHROPIC_API_KEY"],
     "GEMINI_API_KEY":             os.environ["GEMINI_API_KEY"],
-    "LANGFUSE_S3_ACCESS_KEY_ID":  os.environ["LANGFUSE_S3_ACCESS_KEY_ID"],
-    "LANGFUSE_S3_SECRET_ACCESS_KEY": os.environ["LANGFUSE_S3_SECRET_ACCESS_KEY"],
 }
 
 # Include optional OIDC keys only when non-empty

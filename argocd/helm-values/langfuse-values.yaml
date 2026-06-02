@@ -162,18 +162,7 @@ clickhouse:
     existingSecretKey: "CLICKHOUSE_PASSWORD"
 
 # ============================================================================
-# S3 — use AWS S3, disable bundled MinIO
+# S3 — disabled (not required by platform requirements)
 # ============================================================================
 s3:
   deploy: false
-  bucket: llmops-langfuse
-  region: ap-southeast-1
-  forcePathStyle: false
-  accessKeyId:
-    secretKeyRef:
-      name: llmops-apikeys-secret
-      key: LANGFUSE_S3_ACCESS_KEY_ID
-  secretAccessKey:
-    secretKeyRef:
-      name: llmops-apikeys-secret
-      key: LANGFUSE_S3_SECRET_ACCESS_KEY
