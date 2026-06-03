@@ -100,37 +100,6 @@ spec:
             grafanaAgent:
               installOperator: false
 
-        # Promtail — DaemonSet log shipper, collects pod logs and ships to Loki
-        promtail:
-          enabled: true
-          config:
-            clients:
-              - url: http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push
-            snippets:
-              pipelineStages:
-                - cri: {}
-              scrapeConfigs: |
-                - job_name: kubernetes-pods
-                  pipeline_stages:
-                    - cri: {}
-                  kubernetes_sd_configs:
-                    - role: pod
-                  relabel_configs:
-                    - source_labels: [__meta_kubernetes_pod_node_name]
-                      target_label: __host__
-                    - action: labelmap
-                      regex: __meta_kubernetes_pod_label_(.+)
-                    - source_labels: [__meta_kubernetes_namespace]
-                      target_label: namespace
-                    - source_labels: [__meta_kubernetes_pod_name]
-                      target_label: pod
-                    - source_labels: [__meta_kubernetes_container_name]
-                      target_label: container
-                    - replacement: /var/log/pods/*$1*/*/*.log
-                      separator: /
-                      source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
-                      target_label: __path__
-
         # Test
         test:
           enabled: false

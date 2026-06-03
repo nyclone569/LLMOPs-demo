@@ -1,0 +1,92 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: promtail
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  project: llmops
+
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: promtail
+    targetRevision: 6.17.1
+    helm:
+      releaseName: promtail
+      values: |
+        config:
+          clients:
+            - url: http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push
+
+          snippets:
+            pipelineStages:
+              - cri: {}
+
+            scrapeConfigs: |
+              - job_name: kubernetes-pods
+                pipeline_stages:
+                  - cri: {}
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_node_name]
+                    target_label: __host__
+                  - action: labelmap
+                    regex: __meta_kubernetes_pod_label_(.+)
+                  - source_labels: [__meta_kubernetes_namespace]
+                    target_label: namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    target_label: pod
+                  - source_labels: [__meta_kubernetes_container_name]
+                    target_label: container
+                  - replacement: /var/log/pods/*$1*/*/*.log
+                    separator: /
+                    source_labels:
+                      - __meta_kubernetes_pod_uid
+                      - __meta_kubernetes_pod_container_name
+                    target_label: __path__
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+        tolerations:
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+
+        serviceMonitor:
+          enabled: true
+          labels:
+            release: kube-prometheus-stack
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: loki
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
