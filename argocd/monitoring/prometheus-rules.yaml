@@ -162,17 +162,6 @@ spec:
             summary: "PostgreSQL connection usage above 80%"
             description: "PostgreSQL is using {{ $value | humanizePercentage }} of max_connections on {{ $labels.instance }}."
 
-        - alert: LangfuseIngestionDelayHigh
-          expr: |
-            langfuse_ingestion_delay_seconds > 60
-          for: 5m
-          labels:
-            severity: warning
-            component: langfuse
-          annotations:
-            summary: "Langfuse trace ingestion delay above 60 seconds"
-            description: "Langfuse trace ingestion delay is {{ $value }}s, exceeding the 60 second SLO."
-
     - name: llmops-cost-tracking
       interval: 60s
       rules:
@@ -203,15 +192,6 @@ spec:
     - name: llmops-security
       interval: 30s
       rules:
-        - alert: SensitivePromptDetected
-          expr: increase(langfuse_sensitive_prompts_total[5m]) > 0
-          labels:
-            severity: critical
-            component: security
-          annotations:
-            summary: "Sensitive data detected in prompts"
-            description: "{{ $value }} prompts with potential sensitive data detected in last 5 minutes."
-
         - alert: UnusualRequestPattern
           expr: |
             rate(litellm_deployment_total_requests_total[5m]) > 2 * avg_over_time(rate(litellm_deployment_total_requests_total[5m])[1h:5m])

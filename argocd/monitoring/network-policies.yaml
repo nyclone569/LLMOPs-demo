@@ -100,6 +100,16 @@ spec:
         - protocol: TCP
           port: 4000
   egress:
+    # CoreDNS — required for in-cluster DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
     # Redis
     - to:
         - namespaceSelector:
@@ -181,6 +191,16 @@ spec:
         - protocol: TCP
           port: 3000
   egress:
+    # CoreDNS — required for in-cluster DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
     # Redis
     - to:
         - namespaceSelector:
@@ -242,6 +262,16 @@ spec:
         - protocol: TCP
           port: 8080
   egress:
+    # CoreDNS — required for in-cluster DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
     # LiteLLM backend
     - to:
         - namespaceSelector:

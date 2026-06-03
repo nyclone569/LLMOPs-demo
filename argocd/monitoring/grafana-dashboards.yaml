@@ -411,13 +411,13 @@ data:
         },
         {
           "id": 7,
-          "title": "Sensitive Prompts Detected (24h)",
-          "type": "stat",
+          "title": "Fallback Usage (24h)",
+          "type": "timeseries",
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
           "targets": [
             {
-              "expr": "sum(increase(langfuse_sensitive_prompts_total[24h]))",
-              "legendFormat": "Sensitive Prompts"
+              "expr": "sum(increase(litellm_deployment_failure_responses_total[24h])) by (litellm_model_name)",
+              "legendFormat": "{{ litellm_model_name }} failures"
             }
           ]
         }
