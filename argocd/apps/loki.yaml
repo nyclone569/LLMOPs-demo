@@ -92,6 +92,9 @@ spec:
 
         # Monitoring
         monitoring:
+          dashboards:
+            enabled: false
+
           serviceMonitor:
             enabled: true
 
