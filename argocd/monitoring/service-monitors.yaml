@@ -56,3 +56,22 @@ spec:
   endpoints:
     - port: metrics
       path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: open-webui
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - open-webui
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-webui
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

@@ -92,12 +92,24 @@ langfuse:
       cpu: "500m"
 
   # ============================================================================
-  # WEB POD CONFIG — probe overrides must be under langfuse.web (chart schema).
-  # Langfuse startup: Prisma migration check + ClickHouse DDL + Next.js boot
-  # takes 60-120s. Chart default initialDelaySeconds=20 causes SIGTERM (exit
-  # 143) before the app is ready. No startupProbe support in chart v1.0.0.
+  # REPLICAS — chart key is `replicas` (not `replicaCount`)
+  # ============================================================================
+  replicas: 2
+
+  # ============================================================================
+  # WEB — probes + replicas + HPA all under langfuse.web
+  # Langfuse startup: Prisma migration + ClickHouse DDL + Next.js boot takes
+  # 60-120s. initialDelaySeconds=150 prevents SIGKILL before app is ready.
   # ============================================================================
   web:
+    replicas: 2
+
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+
     livenessProbe:
       initialDelaySeconds: 150
       periodSeconds: 15
@@ -109,6 +121,24 @@ langfuse:
       periodSeconds: 15
       failureThreshold: 3
       timeoutSeconds: 5
+
+  # ============================================================================
+  # WORKER — replicas under langfuse.worker (not top-level worker)
+  # ============================================================================
+  worker:
+    replicas: 2
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "200m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
 
   # ============================================================================
   # INGRESS
@@ -136,21 +166,6 @@ langfuse:
       enabled: false
 
   # ============================================================================
-  # DEPLOYMENT
-  # ============================================================================
-  replicaCount: 2
-
-  # ============================================================================
-  # AUTOSCALING
-  # ============================================================================
-  autoscaling:
-    enabled: true
-    minReplicas: 2
-    maxReplicas: 5
-    targetCPUUtilizationPercentage: 70
-    targetMemoryUtilizationPercentage: 80
-
-  # ============================================================================
   # POD ANNOTATIONS
   # ============================================================================
   podAnnotations:
@@ -164,19 +179,6 @@ langfuse:
   commonLabels:
     app.kubernetes.io/part-of: llmops-platform
     app.kubernetes.io/component: observability
-
-# ============================================================================
-# WORKER — background trace processing
-# ============================================================================
-worker:
-  replicaCount: 2
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
 
 # ============================================================================
 # DATABASE — in-cluster PostgreSQL (postgresql namespace)
