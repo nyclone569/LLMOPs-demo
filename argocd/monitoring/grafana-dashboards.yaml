@@ -432,18 +432,43 @@ data:
       "tags": ["llmops", "logs"],
       "timezone": "browser",
       "schemaVersion": 38,
-      "version": 4,
+      "version": 5,
       "refresh": "30s",
       "time": {"from": "now-1h", "to": "now"},
       "templating": {
-        "list": []
+        "list": [
+          {
+            "name": "text_search",
+            "type": "textbox",
+            "label": "Text Search",
+            "current": {"text": ".", "value": "."}
+          },
+          {
+            "name": "trace_id",
+            "type": "textbox",
+            "label": "Trace ID",
+            "current": {"text": ".+", "value": ".+"}
+          },
+          {
+            "name": "user_id",
+            "type": "textbox",
+            "label": "User ID",
+            "current": {"text": ".+", "value": ".+"}
+          },
+          {
+            "name": "model_alias",
+            "type": "textbox",
+            "label": "Model Alias",
+            "current": {"text": "fast-chat|coding-assistant|private-chat|long-context|fallback-model", "value": "fast-chat|coding-assistant|private-chat|long-context|fallback-model"}
+          }
+        ]
       },
       "panels": [
         {
           "id": 1,
-          "title": "Logs",
+          "title": "All Logs",
           "type": "logs",
-          "gridPos": {"h": 20, "w": 24, "x": 0, "y": 0},
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
           "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
           "targets": [
             {
@@ -465,9 +490,201 @@ data:
         },
         {
           "id": 2,
+          "title": "Text Search",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)$text_search\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 3,
+          "title": "LiteLLM Logs",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=\"litellm\", pod=~\".+\"}",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 4,
+          "title": "Trace ID Search",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)trace[_-]?id[=:\\\" ]+$trace_id\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 5,
+          "title": "User ID Search",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)user[_-]?id[=:\\\" ]+$user_id\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 6,
+          "title": "Model Alias Search",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)(model|model_alias|litellm_model_name)[=:\\\" ]+($model_alias)\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 7,
+          "title": "Failed Requests",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)(error|failed|failure|exception|status[=:\\\" ]+[45][0-9][0-9])\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 8,
+          "title": "Provider Timeouts and Rate Limits",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 42},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)(timeout|timed out|rate.?limit|too many requests|429)\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 9,
+          "title": "Sensitive Data Warnings",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 42},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "targets": [
+            {
+              "expr": "{namespace=~\".+\", pod=~\".+\"} |~ \"(?i)(sensitive|redact|masked|AKIA|sk-proj|postgresql://|credit card|ssn)\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none"
+          }
+        },
+        {
+          "id": 10,
           "title": "Log Volume",
           "type": "timeseries",
-          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 50},
           "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
           "targets": [
             {
