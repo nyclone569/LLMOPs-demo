@@ -445,6 +445,7 @@ data:
             "refresh": 2,
             "includeAll": true,
             "allValue": ".+",
+            "current": {"selected": true, "text": "All", "value": "$__all"},
             "multi": false,
             "sort": 1,
             "label": "Namespace"
@@ -453,25 +454,14 @@ data:
             "name": "pod",
             "type": "query",
             "datasource": {"type": "loki", "uid": ""},
-            "query": "label_values({namespace=\"$namespace\"}, pod)",
+            "query": "label_values({namespace=~\"$namespace\"}, pod)",
             "refresh": 2,
             "includeAll": true,
             "allValue": ".+",
+            "current": {"selected": true, "text": "All", "value": "$__all"},
             "multi": false,
             "sort": 1,
             "label": "Pod"
-          },
-          {
-            "name": "container",
-            "type": "query",
-            "datasource": {"type": "loki", "uid": ""},
-            "query": "label_values({namespace=\"$namespace\", pod=~\"$pod\"}, container)",
-            "refresh": 2,
-            "includeAll": true,
-            "allValue": ".+",
-            "multi": false,
-            "sort": 1,
-            "label": "Container"
           },
           {
             "name": "search",
@@ -490,8 +480,8 @@ data:
           "datasource": {"type": "loki", "uid": ""},
           "targets": [
             {
-              "expr": "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\"",
-              "legendFormat": "{{pod}}/{{container}}",
+              "expr": "{namespace=~\"$namespace\", pod=~\"$pod\"} |~ \"$search\"",
+              "legendFormat": "{{namespace}}/{{pod}}",
               "refId": "A"
             }
           ],
