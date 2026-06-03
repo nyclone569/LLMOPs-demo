@@ -436,51 +436,18 @@ data:
       "refresh": "30s",
       "time": {"from": "now-1h", "to": "now"},
       "templating": {
-        "list": [
-          {
-            "name": "namespace",
-            "type": "query",
-            "datasource": {"type": "loki", "uid": ""},
-            "query": "label_values(namespace)",
-            "refresh": 2,
-            "includeAll": true,
-            "allValue": ".+",
-            "current": {"selected": true, "text": "All", "value": "$__all"},
-            "multi": false,
-            "sort": 1,
-            "label": "Namespace"
-          },
-          {
-            "name": "pod",
-            "type": "query",
-            "datasource": {"type": "loki", "uid": ""},
-            "query": "label_values({namespace=~\"$namespace\"}, pod)",
-            "refresh": 2,
-            "includeAll": true,
-            "allValue": ".+",
-            "current": {"selected": true, "text": "All", "value": "$__all"},
-            "multi": false,
-            "sort": 1,
-            "label": "Pod"
-          },
-          {
-            "name": "search",
-            "type": "textbox",
-            "label": "Search",
-            "current": {"value": ""}
-          }
-        ]
+        "list": []
       },
       "panels": [
         {
           "id": 1,
-          "title": "Logs — $namespace / $pod",
+          "title": "Logs",
           "type": "logs",
           "gridPos": {"h": 20, "w": 24, "x": 0, "y": 0},
           "datasource": {"type": "loki", "uid": ""},
           "targets": [
             {
-              "expr": "{namespace=~\"$namespace\", pod=~\"$pod\"} |~ \"$search\"",
+              "expr": "{namespace=~\".+\", pod=~\".+\"}",
               "legendFormat": "{{namespace}}/{{pod}}",
               "refId": "A"
             }
@@ -498,13 +465,13 @@ data:
         },
         {
           "id": 2,
-          "title": "Log Volume — $namespace",
+          "title": "Log Volume",
           "type": "timeseries",
           "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
           "datasource": {"type": "loki", "uid": ""},
           "targets": [
             {
-              "expr": "sum(rate({namespace=~\"$namespace\", pod=~\"$pod\"}[1m])) by (namespace, pod)",
+              "expr": "sum(rate({namespace=~\".+\", pod=~\".+\"}[1m])) by (namespace, pod)",
               "legendFormat": "{{namespace}}/{{pod}}"
             }
           ],
