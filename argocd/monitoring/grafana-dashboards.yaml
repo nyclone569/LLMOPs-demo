@@ -444,7 +444,7 @@ data:
           "title": "Logs",
           "type": "logs",
           "gridPos": {"h": 20, "w": 24, "x": 0, "y": 0},
-          "datasource": {"type": "loki", "uid": ""},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
           "targets": [
             {
               "expr": "{namespace=~\".+\", pod=~\".+\"}",
@@ -468,7 +468,7 @@ data:
           "title": "Log Volume",
           "type": "timeseries",
           "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
-          "datasource": {"type": "loki", "uid": ""},
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
           "targets": [
             {
               "expr": "sum(rate({namespace=~\".+\", pod=~\".+\"}[1m])) by (namespace, pod)",
