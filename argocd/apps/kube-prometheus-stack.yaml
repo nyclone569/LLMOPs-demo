@@ -112,20 +112,6 @@ spec:
               cpu: 500m
               memory: 512Mi
 
-          # Pre-configured dashboards
-          dashboardProviders:
-            dashboardproviders.yaml:
-              apiVersion: 1
-              providers:
-                - name: 'llmops'
-                  orgId: 1
-                  folder: 'LLMOps Platform'
-                  type: file
-                  disableDeletion: false
-                  editable: true
-                  options:
-                    path: /var/lib/grafana/dashboards/llmops
-
           # Additional data sources
           additionalDataSources:
             - name: Loki
