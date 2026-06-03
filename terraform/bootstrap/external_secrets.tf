@@ -91,6 +91,7 @@ resource "null_resource" "cluster_secret_store_aws" {
 
   provisioner "local-exec" {
     command = <<-EOF
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${local.cluster_name}
       until kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1; do
         echo "Waiting for ClusterSecretStore CRD..."; sleep 5
       done

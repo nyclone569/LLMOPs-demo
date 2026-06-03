@@ -63,6 +63,7 @@ resource "null_resource" "cluster_issuer_letsencrypt_staging" {
 
   provisioner "local-exec" {
     command = <<-EOF
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${local.cluster_name}
       until kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1; do
         echo "Waiting for ClusterIssuer CRD..."; sleep 5
       done
@@ -95,6 +96,7 @@ resource "null_resource" "cluster_issuer_letsencrypt_prod" {
 
   provisioner "local-exec" {
     command = <<-EOF
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${local.cluster_name}
       until kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1; do
         echo "Waiting for ClusterIssuer CRD..."; sleep 5
       done
