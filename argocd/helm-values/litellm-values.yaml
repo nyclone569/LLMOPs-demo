@@ -19,7 +19,7 @@ replicaCount: 3
 # ============================================================================
 resources:
   requests:
-    memory: "1500Mi"
+    memory: "1100Mi"
     cpu: "200m"
   limits:
     memory: "2Gi"
@@ -414,7 +414,7 @@ podDisruptionBudget:
 autoscaling:
   enabled: true
   minReplicas: 3
-  maxReplicas: 10
+  maxReplicas: 4
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
