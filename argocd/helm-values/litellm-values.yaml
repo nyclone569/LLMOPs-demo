@@ -134,8 +134,9 @@ config:
     # Coding Assistant - Engineering and code review
     - model_name: coding-assistant
       litellm_params:
-        model: gpt-4o
-        api_key: os.environ/OPENAI_API_KEY
+        model: anthropic/claude-sonnet-4-6
+        api_base: https://vip.digishop.work
+        api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
         supports_function_calling: true
@@ -178,6 +179,23 @@ config:
       litellm_params:
         model: gpt-4o-mini
         api_key: os.environ/OPENAI_API_KEY
+      model_info:
+        mode: chat
+
+    # Claude models via custom Anthropic-compatible endpoint
+    - model_name: claude-sonnet
+      litellm_params:
+        model: anthropic/claude-sonnet-4-6
+        api_base: https://vip.digishop.work
+        api_key: os.environ/ANTHROPIC_API_KEY
+      model_info:
+        mode: chat
+
+    - model_name: claude-haiku
+      litellm_params:
+        model: anthropic/claude-haiku-4-5-20251001
+        api_base: https://vip.digishop.work
+        api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
 
