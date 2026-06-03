@@ -77,7 +77,7 @@ env:
         key: LANGFUSE_SECRET_KEY
 
   - name: LANGFUSE_HOST
-    value: "http://langfuse.langfuse.svc.cluster.local:3000"
+    value: "http://langfuse-web.langfuse.svc.cluster.local:3000"
 
   # Provider API keys
   - name: OPENAI_API_KEY
