@@ -182,6 +182,12 @@ spec:
         kubeStateMetrics:
           enabled: true
 
+        # Disable etcd monitoring — EKS manages etcd in the control plane;
+        # endpoints are not reachable from the data plane, so the target
+        # stays permanently down and clutters Prometheus/Grafana.
+        kubeEtcd:
+          enabled: false
+
         # Default rules
         defaultRules:
           create: true
