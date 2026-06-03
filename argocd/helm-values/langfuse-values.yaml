@@ -199,6 +199,6 @@ clickhouse:
 # ============================================================================
 s3:
   deploy: false
-  bucket: llmops-langfuse
+  bucket: llmops-langfuse-492372116094
   region: ap-southeast-1
   forcePathStyle: false
