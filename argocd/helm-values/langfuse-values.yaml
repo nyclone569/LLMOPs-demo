@@ -63,6 +63,23 @@ langfuse:
           name: llmops-apikeys-secret
           key: LANGFUSE_S3_SECRET_ACCESS_KEY
 
+    # AWS SDK default credential chain reads AWS_ACCESS_KEY_ID/SECRET.
+    # Langfuse's S3Client falls back to this chain instead of LANGFUSE_S3_*.
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: llmops-apikeys-secret
+          key: LANGFUSE_S3_ACCESS_KEY_ID
+
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: llmops-apikeys-secret
+          key: LANGFUSE_S3_SECRET_ACCESS_KEY
+
+    - name: AWS_REGION
+      value: "ap-southeast-1"
+
   # ============================================================================
   # RESOURCES
   # ============================================================================
