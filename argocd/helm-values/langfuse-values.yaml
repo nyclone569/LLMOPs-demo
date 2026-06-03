@@ -44,6 +44,18 @@ langfuse:
     - name: LANGFUSE_WORKER_POSTHOG_ENABLED
       value: "false"
 
+    - name: LANGFUSE_S3_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: llmops-apikeys-secret
+          key: LANGFUSE_S3_ACCESS_KEY_ID
+
+    - name: LANGFUSE_S3_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: llmops-apikeys-secret
+          key: LANGFUSE_S3_SECRET_ACCESS_KEY
+
   # ============================================================================
   # RESOURCES
   # ============================================================================
