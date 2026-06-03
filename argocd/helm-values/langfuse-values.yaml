@@ -68,36 +68,23 @@ langfuse:
       cpu: "500m"
 
   # ============================================================================
-  # PROBES — Langfuse startup requires Prisma + ClickHouse DDL + Next.js boot.
-  # ClickHouse ON CLUSTER DDL with Keeper takes ~60-120s on first run.
-  # Default delay=20s causes SIGTERM (exit 143) before app can start.
+  # WEB POD CONFIG — probe overrides must be under langfuse.web (chart schema).
+  # Langfuse startup: Prisma migration check + ClickHouse DDL + Next.js boot
+  # takes 60-120s. Chart default initialDelaySeconds=20 causes SIGTERM (exit
+  # 143) before the app is ready. No startupProbe support in chart v1.0.0.
   # ============================================================================
-  startupProbe:
-    httpGet:
-      path: /api/public/health
-      port: 3000
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    failureThreshold: 18    # 30 + 18×10 = 210s startup budget
-    timeoutSeconds: 5
+  web:
+    livenessProbe:
+      initialDelaySeconds: 150
+      periodSeconds: 15
+      failureThreshold: 3
+      timeoutSeconds: 5
 
-  livenessProbe:
-    httpGet:
-      path: /api/public/health
-      port: 3000
-    initialDelaySeconds: 0
-    periodSeconds: 15
-    failureThreshold: 3
-    timeoutSeconds: 5
-
-  readinessProbe:
-    httpGet:
-      path: /api/public/ready
-      port: 3000
-    initialDelaySeconds: 0
-    periodSeconds: 10
-    failureThreshold: 3
-    timeoutSeconds: 5
+    readinessProbe:
+      initialDelaySeconds: 150
+      periodSeconds: 15
+      failureThreshold: 3
+      timeoutSeconds: 5
 
   # ============================================================================
   # INGRESS
