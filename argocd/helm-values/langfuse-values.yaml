@@ -173,7 +173,7 @@ postgresql:
     existingSecret: "llmops-apikeys-secret"
     secretKeys:
       userPasswordKey: "POSTGRESQL_PASSWORD"
-    database: "postgres"
+    database: "langfuse"
 
 # ============================================================================
 # REDIS — use existing cluster Redis (shared with LiteLLM)
