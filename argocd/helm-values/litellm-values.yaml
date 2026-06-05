@@ -303,27 +303,29 @@ config:
 
   # Guardrails — regex-based PII masking applied pre-call so secrets/PII
   # never reach upstream providers or observability sinks.
-  guardrails:
-    - guardrail_name: "pii-mask-pre-call"
-      litellm_params:
-        guardrail: regex
-        mode: "pre_call"
-        default_on: true
-        regex_rules:
-          - pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-            replacement: "[EMAIL_REDACTED]"
-          - pattern: '\b(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}\b'
-            replacement: "[PHONE_REDACTED]"
-          - pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
-            replacement: "[CARD_REDACTED]"
-          - pattern: '\b\d{3}-\d{2}-\d{4}\b'
-            replacement: "[SSN_REDACTED]"
-          - pattern: '(?i)(api[_-]?key|secret|token|password)["\s:=]+[A-Za-z0-9_\-\.]{16,}'
-            replacement: "[SECRET_REDACTED]"
-          - pattern: 'sk-[A-Za-z0-9]{20,}'
-            replacement: "[API_KEY_REDACTED]"
-          - pattern: 'AKIA[0-9A-Z]{16}'
-            replacement: "[AWS_KEY_REDACTED]"
+  # NOTE: Disabled — LiteLLM main-latest does not yet support guardrail type "regex".
+  # Re-enable when upgrading to a version with regex guardrail support.
+  # guardrails:
+  #   - guardrail_name: "pii-mask-pre-call"
+  #     litellm_params:
+  #       guardrail: regex
+  #       mode: "pre_call"
+  #       default_on: true
+  #       regex_rules:
+  #         - pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+  #           replacement: "[EMAIL_REDACTED]"
+  #         - pattern: '\b(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}\b'
+  #           replacement: "[PHONE_REDACTED]"
+  #         - pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+  #           replacement: "[CARD_REDACTED]"
+  #         - pattern: '\b\d{3}-\d{2}-\d{4}\b'
+  #           replacement: "[SSN_REDACTED]"
+  #         - pattern: '(?i)(api[_-]?key|secret|token|password)["\s:=]+[A-Za-z0-9_\-\.]{16,}'
+  #           replacement: "[SECRET_REDACTED]"
+  #         - pattern: 'sk-[A-Za-z0-9]{20,}'
+  #           replacement: "[API_KEY_REDACTED]"
+  #         - pattern: 'AKIA[0-9A-Z]{16}'
+  #           replacement: "[AWS_KEY_REDACTED]"
 
   # General settings - budget, rate limits, auth
   general_settings:
