@@ -78,6 +78,15 @@ openaiApiKeyExistingSecretKey: "LITELLM_MASTER_KEY"
 # ENVIRONMENT VARIABLES
 # ============================================================================
 extraEnvVars:
+  # WEBUI_URL must match the host the browser uses, because Open WebUI
+  # builds the OAuth redirect_uri from this value. Internal ALB is not
+  # reachable from outside the VPC, so during port-forward testing
+  # (kubectl port-forward 8080:80) override to localhost:8080 here and
+  # add the same redirect URI in Google Cloud Console. When a real
+  # custom domain / VPN entry exists, set this to the canonical host.
+  - name: WEBUI_URL
+    value: "http://localhost:8080"
+
   # WebUI session secret
   - name: WEBUI_SECRET_KEY
     valueFrom:
