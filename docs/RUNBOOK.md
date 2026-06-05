@@ -256,37 +256,8 @@ OIDC_CLIENT_SECRET         # Google OAuth client secret
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(48))"
    ```
-2. Cập nhật value trong AWS SM (giữ nguyên các key khác):
-   ```bash
-   aws secretsmanager get-secret-value --region ap-southeast-1 \
-     --secret-id llmops/apikeys --query SecretString --output text > /tmp/sm.json
-   # ... edit /tmp/sm.json ...
-   aws secretsmanager put-secret-value --region ap-southeast-1 \
-     --secret-id llmops/apikeys --secret-string file:///tmp/sm.json
-   rm /tmp/sm.json
-   ```
-3. ExternalSecrets refresh mỗi 1h. Force ngay:
-   ```bash
-   kubectl annotate externalsecret -n open-webui llmops-apikeys-secret \
-     force-sync=$(date +%s) --overwrite
-   kubectl annotate externalsecret -n litellm llmops-apikeys-secret \
-     force-sync=$(date +%s) --overwrite
-   kubectl annotate externalsecret -n langfuse llmops-apikeys-secret \
-     force-sync=$(date +%s) --overwrite
-   ```
-4. Verify ESO đã sync xong:
-   ```bash
-   kubectl -n open-webui get externalsecret llmops-apikeys-secret \
-     -o jsonpath='{.status.refreshTime}'
-   ```
-5. Rolling restart consumer để pickup env mới:
-   ```bash
-   kubectl rollout restart statefulset/open-webui -n open-webui
-   kubectl rollout restart deploy/litellm -n litellm
-   kubectl rollout restart deploy/langfuse-web -n langfuse
-   kubectl rollout restart deploy/langfuse-worker -n langfuse
-   ```
-6. `kubectl rollout status` cho từng workload trước khi revoke key cũ ở provider.
+2. Update SM theo luồng chuẩn §5.4 (thay value của key cần rotate).
+3. `kubectl rollout status` cho từng workload trước khi revoke key cũ ở provider.
 
 ### 5.3 Bật SSO/OIDC — Google Workspace
 
@@ -298,26 +269,164 @@ Helm values `open-webui-values.yaml` đã hard-code `OPENID_PROVIDER_URL` của 
    - Authorized redirect URIs: `http://internal-llmops-open-webui-54615089.ap-southeast-1.elb.amazonaws.com/oauth/oidc/callback`
      (đổi sang `https://chat.<domain>/oauth/oidc/callback` khi có custom domain + ACM)
 2. Copy `Client ID` và `Client secret`.
-3. Thêm 2 key vào AWS SM `llmops/apikeys`:
+3. Thêm 2 key vào AWS SM theo luồng §5.4, edit step như sau:
    ```bash
-   aws secretsmanager get-secret-value --region ap-southeast-1 \
-     --secret-id llmops/apikeys --query SecretString --output text > /tmp/sm.json
-   python3 -c "import json; d=json.load(open('/tmp/sm.json')); \
-     d['OIDC_CLIENT_ID']='<paste>'; d['OIDC_CLIENT_SECRET']='<paste>'; \
-     json.dump(d, open('/tmp/sm.json','w'))"
-   aws secretsmanager put-secret-value --region ap-southeast-1 \
-     --secret-id llmops/apikeys --secret-string file:///tmp/sm.json
-   rm /tmp/sm.json
+   python3 -c "
+   import json
+   d = json.load(open('/tmp/sm.json'))
+   d['OIDC_CLIENT_ID'] = '<paste client_id>'
+   d['OIDC_CLIENT_SECRET'] = '<paste client_secret>'
+   json.dump(d, open('/tmp/sm.json','w'))
+   "
    ```
-4. Force ExternalSecret refresh + rollout:
-   ```bash
-   kubectl annotate externalsecret -n open-webui llmops-apikeys-secret \
-     force-sync=$(date +%s) --overwrite
-   kubectl rollout restart statefulset/open-webui -n open-webui
-   ```
-5. Verify: vào ALB DNS, login form hiện **Sign in with Google**.
+4. Verify: vào ALB DNS (qua VPN) hoặc port-forward + localhost, login form hiện **Sign in with Google**.
 
 Restrict theo domain (tuỳ chọn): set env `OAUTH_ALLOWED_DOMAINS=company.com` trong helm values.
+
+### 5.4 Cập nhật AWS Secrets Manager — luồng chuẩn
+
+Quy trình áp dụng cho mọi thay đổi `llmops/apikeys`: thêm key mới, sửa value, xoay key, recover key bị mất. Tuân thủ để tránh 5 bẫy ở mục 5.5.
+
+**Nguyên tắc**: `put-secret-value` thay thế **toàn bộ** payload, không merge — luôn đọc trước, edit, push lại toàn bộ JSON.
+
+#### Bước 1 — Đọc payload hiện tại + verify
+
+```bash
+aws secretsmanager get-secret-value --region ap-southeast-1 \
+  --secret-id llmops/apikeys --query SecretString --output text > /tmp/sm.json
+
+python3 -c "
+import json
+d = json.load(open('/tmp/sm.json'))
+print('Current keys:', sorted(d.keys()))
+print('Total:', len(d))
+"
+```
+
+#### Bước 2 — Edit JSON
+
+```bash
+# Cách A — Python one-liner cho 1 thay đổi
+python3 -c "
+import json
+d = json.load(open('/tmp/sm.json'))
+d['NEW_KEY'] = 'new_value'        # thêm/sửa
+# del d['OLD_KEY']                # xoá
+json.dump(d, open('/tmp/sm.json','w'))
+"
+
+# Cách B — editor cho nhiều thay đổi
+vim /tmp/sm.json
+```
+
+#### Bước 3 — Verify bắt buộc trước khi push
+
+```bash
+python3 -c "
+import json
+d = json.load(open('/tmp/sm.json'))
+required = ['LITELLM_MASTER_KEY','LITELLM_SALT_KEY','WEBUI_SECRET_KEY',
+            'OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY',
+            'LANGFUSE_PUBLIC_KEY','LANGFUSE_SECRET_KEY',
+            'LANGFUSE_S3_ACCESS_KEY_ID','LANGFUSE_S3_SECRET_ACCESS_KEY',
+            'REDIS_PASSWORD','POSTGRESQL_PASSWORD','CLICKHOUSE_PASSWORD']
+missing = [k for k in required if k not in d]
+print('Missing required:', missing)
+assert not missing, 'STOP — required keys missing, do not push'
+print('OK, safe to push. Keys:', sorted(d.keys()))
+"
+```
+
+Nếu thấy `Missing required` → DỪNG, sửa lại file. Đừng push.
+
+#### Bước 4 — Push + force-sync ESO + rollout
+
+```bash
+# 1. Push lên SM
+aws secretsmanager put-secret-value --region ap-southeast-1 \
+  --secret-id llmops/apikeys --secret-string file:///tmp/sm.json \
+  --query VersionId --output text
+
+# 2. Xoá temp file ngay
+rm /tmp/sm.json
+
+# 3. Force-sync ESO ở MỌI namespace dùng secret (loop)
+for ns in $(kubectl get externalsecret -A \
+  -o jsonpath='{range .items[?(@.metadata.name=="llmops-apikeys-secret")]}{.metadata.namespace}{"\n"}{end}'); do
+  kubectl annotate externalsecret -n $ns llmops-apikeys-secret \
+    force-sync=$(date +%s) --overwrite
+done
+
+# 4. Đợi K8s secret cập nhật (nếu thêm key mới, check key đó)
+until kubectl -n open-webui get secret llmops-apikeys-secret \
+  -o jsonpath='{.data.NEW_KEY}' | grep -q .; do
+  sleep 3
+done
+
+# 5. Rollout consumer
+kubectl -n open-webui rollout restart statefulset/open-webui
+kubectl -n litellm   rollout restart deploy/litellm
+kubectl -n langfuse  rollout restart deploy/langfuse-web
+kubectl -n langfuse  rollout restart deploy/langfuse-worker
+
+# 6. Verify env trong pod
+kubectl -n open-webui exec open-webui-0 -- env | grep NEW_KEY
+```
+
+#### Recovery — Khi lỡ overwrite mất key
+
+Đã dùng để khôi phục `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` 2026-06-05.
+
+```bash
+# 1. List versions
+aws secretsmanager list-secret-version-ids --region ap-southeast-1 \
+  --secret-id llmops/apikeys --include-deprecated \
+  --query 'Versions[*].{VersionId:VersionId,Stages:VersionStages,Created:CreatedDate}' \
+  --output table
+
+# 2. Lấy version AWSPREVIOUS (chứa key đã mất)
+PREV_ID=$(aws secretsmanager list-secret-version-ids --region ap-southeast-1 \
+  --secret-id llmops/apikeys --include-deprecated \
+  --query 'Versions[?contains(VersionStages,`AWSPREVIOUS`)].VersionId' \
+  --output text)
+
+aws secretsmanager get-secret-value --region ap-southeast-1 \
+  --secret-id llmops/apikeys --version-id $PREV_ID \
+  --query SecretString --output text > /tmp/prev.json
+
+aws secretsmanager get-secret-value --region ap-southeast-1 \
+  --secret-id llmops/apikeys \
+  --query SecretString --output text > /tmp/curr.json
+
+# 3. Merge key thiếu từ prev → curr
+python3 -c "
+import json
+prev = json.load(open('/tmp/prev.json'))
+curr = json.load(open('/tmp/curr.json'))
+recover = ['OIDC_CLIENT_ID','OIDC_CLIENT_SECRET']   # đổi danh sách theo nhu cầu
+for k in recover:
+    if k in prev and k not in curr:
+        curr[k] = prev[k]
+        print(f'Restored {k}')
+json.dump(curr, open('/tmp/curr.json','w'))
+"
+
+# 4. Push merged + force-sync + rollout (lặp lại Bước 4 ở trên)
+aws secretsmanager put-secret-value --region ap-southeast-1 \
+  --secret-id llmops/apikeys --secret-string file:///tmp/curr.json
+
+rm /tmp/prev.json /tmp/curr.json
+```
+
+### 5.5 Bẫy hay gặp khi update SM
+
+| Bẫy | Triệu chứng | Phòng tránh |
+|---|---|---|
+| Paste credential thành KEY name qua Console UI Key/value tab | ESO sync OK nhưng env trong pod thiếu biến (`grep OAUTH_CLIENT_ID` rỗng) | Luôn dùng CLI `put-secret-value` với JSON; nếu phải dùng Console thì chọn tab **Plaintext** không phải **Key/value** |
+| `put-secret-value` thay thế toàn bộ payload | Key cũ biến mất sau update (vd. lỡ tay nhập 2 key OIDC làm mất WEBUI_SECRET_KEY) | Luôn `get-secret-value` trước, edit JSON đầy đủ, rồi mới push |
+| Quên force-sync ESO | Pod restart vẫn dùng env cũ vì ESO chưa pull (chờ refresh interval 1h) | Loop annotate `force-sync=$(date +%s)` ở mọi namespace có ExternalSecret |
+| Rollout sau khi K8s secret chưa cập nhật | Pod mới vẫn đọc value cũ | Đợi `kubectl get secret ... | grep <new key>` xuất hiện rồi mới rollout |
+| Lưu `/tmp/sm.json` lâu | Credential lộ trên đĩa, log shell history | `rm` ngay sau khi push; xoá history nếu có lệnh chứa value |
 
 ---
 
