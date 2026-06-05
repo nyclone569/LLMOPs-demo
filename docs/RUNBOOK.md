@@ -182,32 +182,74 @@ OIDC_CLIENT_SECRET
 
 ### 5.2 Xoay key — drill chuẩn
 
-1. Tạo key mới ở provider (vd. OpenAI dashboard).
-2. Cập nhật value trong AWS SM:
+Đã verify bằng `WEBUI_SECRET_KEY` rotation drill (2026-06-05): SM update → ESO refresh < 30s → StatefulSet rollout 2/2 Ready ~1.5 phút.
+
+1. Tạo key mới ở provider (vd. OpenAI dashboard) hoặc generate locally:
    ```bash
-   aws secretsmanager put-secret-value \
-     --region ap-southeast-1 \
-     --secret-id llmops/apikeys \
-     --secret-string file://new-payload.json
+   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+2. Cập nhật value trong AWS SM (giữ nguyên các key khác):
+   ```bash
+   aws secretsmanager get-secret-value --region ap-southeast-1 \
+     --secret-id llmops/apikeys --query SecretString --output text > /tmp/sm.json
+   # ... edit /tmp/sm.json ...
+   aws secretsmanager put-secret-value --region ap-southeast-1 \
+     --secret-id llmops/apikeys --secret-string file:///tmp/sm.json
+   rm /tmp/sm.json
    ```
 3. ExternalSecrets refresh mỗi 1h. Force ngay:
    ```bash
+   kubectl annotate externalsecret -n open-webui llmops-apikeys-secret \
+     force-sync=$(date +%s) --overwrite
    kubectl annotate externalsecret -n litellm llmops-apikeys-secret \
      force-sync=$(date +%s) --overwrite
+   kubectl annotate externalsecret -n langfuse llmops-apikeys-secret \
+     force-sync=$(date +%s) --overwrite
    ```
-4. Rolling restart consumer để pickup env mới:
+4. Verify ESO đã sync xong:
    ```bash
-   kubectl rollout restart deploy/litellm -n litellm
-   kubectl rollout restart deploy/open-webui -n open-webui
+   kubectl -n open-webui get externalsecret llmops-apikeys-secret \
+     -o jsonpath='{.status.refreshTime}'
    ```
-5. Revoke key cũ sau khi rollout xong (`kubectl rollout status`).
+5. Rolling restart consumer để pickup env mới:
+   ```bash
+   kubectl rollout restart statefulset/open-webui -n open-webui
+   kubectl rollout restart deploy/litellm -n litellm
+   kubectl rollout restart deploy/langfuse-web -n langfuse
+   kubectl rollout restart deploy/langfuse-worker -n langfuse
+   ```
+6. `kubectl rollout status` cho từng workload trước khi revoke key cũ ở provider.
 
-### 5.3 Bật SSO/OIDC (tuần 3)
+### 5.3 Bật SSO/OIDC — Google Workspace
 
-1. Đăng ký OAuth client ở IdP (Google/Azure AD), redirect URI = `https://<open-webui-alb>/oauth/oidc/callback`.
-2. Bổ sung 3 key OIDC_* vào `llmops/apikeys`.
-3. Trigger ExternalSecret resync + rollout `open-webui`.
-4. Helm values đã có sẵn (`extraEnvVars` block OIDC) — không cần đổi code.
+Helm values `open-webui-values.yaml` đã hard-code `OPENID_PROVIDER_URL` của Google. Chỉ cần thêm 2 key vào AWS SM.
+
+1. **Google Cloud Console** → APIs & Services → Credentials → **Create OAuth client ID**:
+   - Application type: **Web application**
+   - Name: `LLMOps Internal Chat`
+   - Authorized redirect URIs: `http://internal-llmops-open-webui-54615089.ap-southeast-1.elb.amazonaws.com/oauth/oidc/callback`
+     (đổi sang `https://chat.<domain>/oauth/oidc/callback` khi có custom domain + ACM)
+2. Copy `Client ID` và `Client secret`.
+3. Thêm 2 key vào AWS SM `llmops/apikeys`:
+   ```bash
+   aws secretsmanager get-secret-value --region ap-southeast-1 \
+     --secret-id llmops/apikeys --query SecretString --output text > /tmp/sm.json
+   python3 -c "import json; d=json.load(open('/tmp/sm.json')); \
+     d['OIDC_CLIENT_ID']='<paste>'; d['OIDC_CLIENT_SECRET']='<paste>'; \
+     json.dump(d, open('/tmp/sm.json','w'))"
+   aws secretsmanager put-secret-value --region ap-southeast-1 \
+     --secret-id llmops/apikeys --secret-string file:///tmp/sm.json
+   rm /tmp/sm.json
+   ```
+4. Force ExternalSecret refresh + rollout:
+   ```bash
+   kubectl annotate externalsecret -n open-webui llmops-apikeys-secret \
+     force-sync=$(date +%s) --overwrite
+   kubectl rollout restart statefulset/open-webui -n open-webui
+   ```
+5. Verify: vào ALB DNS, login form hiện **Sign in with Google**.
+
+Restrict theo domain (tuỳ chọn): set env `OAUTH_ALLOWED_DOMAINS=company.com` trong helm values.
 
 ---
 

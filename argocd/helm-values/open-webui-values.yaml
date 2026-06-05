@@ -99,19 +99,26 @@ extraEnvVars:
   - name: WEBUI_LOG_LEVEL
     value: "INFO"
 
-  # SSO/OIDC Configuration
+  # SSO/OIDC Configuration — Google Workspace
+  #
+  # Provider URL is hard-coded to Google's discovery endpoint; only the
+  # client_id / client_secret come from Secrets Manager. To enable:
+  #   1. Google Cloud Console → APIs & Services → Credentials → Create
+  #      OAuth client ID (Web application).
+  #   2. Authorized redirect URI:
+  #        http://internal-llmops-open-webui-54615089.ap-southeast-1.elb.amazonaws.com/oauth/oidc/callback
+  #      (replace host once a custom domain / HTTPS is in front of the ALB)
+  #   3. Add OIDC_CLIENT_ID and OIDC_CLIENT_SECRET to AWS Secrets Manager
+  #      entry llmops/apikeys.
+  #   4. Force ExternalSecret refresh + rollout open-webui — see RUNBOOK §5.3.
   - name: ENABLE_OAUTH_SIGNUP
     value: "true"
 
   - name: OAUTH_PROVIDER_NAME
-    value: "SSO"
+    value: "Google"
 
   - name: OPENID_PROVIDER_URL
-    valueFrom:
-      secretKeyRef:
-        name: llmops-apikeys-secret
-        key: OIDC_PROVIDER_URL
-        optional: true
+    value: "https://accounts.google.com/.well-known/openid-configuration"
 
   - name: OAUTH_CLIENT_ID
     valueFrom:
