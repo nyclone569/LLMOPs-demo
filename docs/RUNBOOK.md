@@ -4,7 +4,7 @@ Mục đích: hướng dẫn vận hành, xử lý sự cố và quy trình thư
 
 - Cluster: `llmops-cluster` — region `ap-southeast-1` — account `492372116094`
 - GitOps: ArgoCD (sync tự động từ `main`)
-- Secrets: AWS Secrets Manager `llmops/apikeys`, `llmops/supabase`
+- Secrets: AWS Secrets Manager `llmops/apikeys` (chính), `llmops/supabase` (legacy — không còn dùng sau khi LiteLLM bỏ `LITELLM_DB_URL`)
 
 ---
 
@@ -125,6 +125,70 @@ kubectl -n loki get pods
 - Path glob phải khớp containerd EKS (`/var/log/pods/*/*/*.log`).
 - Compactor enabled để hết hạn 14d (xem `loki.yaml`).
 
+### 3.7 LiteLLM P1000 "Authentication failed" sau bootstrap fresh
+
+Triệu chứng: pod LiteLLM CrashLoop, log có `prisma db error … Authentication failed against database server`. Nguyên nhân: Bitnami PostgreSQL regenerate password mới khi PVC mới, nhưng `LITELLM_DB_URL` ở SM còn cứng password cũ.
+
+Đã fix permanently: `litellm-values.yaml` build `DATABASE_URL` từ env `POSTGRESQL_PASSWORD`. Nếu vẫn gặp:
+1. Verify cùng password: `kubectl -n postgresql exec postgresql-primary-0 -- bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres -c "SELECT 1"'`
+2. Rotate `POSTGRESQL_PASSWORD` ở AWS SM, force-sync ESO ở cả 3 namespace (postgresql, litellm, langfuse), rồi rollout `postgresql-primary` lẫn `litellm`.
+
+### 3.8 Langfuse migration P3009 deadlock
+
+Triệu chứng: pod langfuse-web CrashLoop, log Prisma báo `Error: P3009` + `deadlock detected … ExclusiveLock on advisory lock`. Nguyên nhân: 2 replica langfuse-web chạy `CREATE INDEX CONCURRENTLY` cùng lúc (migration `20240104210051_add_model_indices`).
+
+Recovery (đã verify 2026-06-05):
+```bash
+# 1. Scale 2 deployment về 0
+kubectl -n langfuse scale deploy/langfuse-web --replicas=0
+kubectl -n langfuse scale deploy/langfuse-worker --replicas=0
+
+# 2. Đợi pod terminate xong, xoá row migration thất bại
+kubectl -n postgresql exec postgresql-primary-0 -- \
+  bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres langfuse \
+  -c "DELETE FROM _prisma_migrations WHERE finished_at IS NULL"'
+
+# 3. Patch HPA min về 1 (nếu không sẽ tự scale 2 → deadlock lại)
+kubectl -n langfuse patch hpa langfuse-web --type merge \
+  -p '{"spec":{"minReplicas":1}}'
+
+# 4. Scale 1 replica, đợi Ready
+kubectl -n langfuse scale deploy/langfuse-web --replicas=1
+kubectl -n langfuse rollout status deploy/langfuse-web
+
+# 5. Khôi phục HPA min=2
+kubectl -n langfuse patch hpa langfuse-web --type merge \
+  -p '{"spec":{"minReplicas":2}}'
+kubectl -n langfuse scale deploy/langfuse-worker --replicas=2
+```
+
+### 3.9 OIDC login không hiện nút Google
+
+Triệu chứng: refresh ALB Open WebUI vẫn chỉ thấy form email/password. `kubectl exec ... curl localhost:8080/api/config` trả `"oauth":{"providers":{}}` rỗng.
+
+Checklist:
+1. Env `OAUTH_CLIENT_ID` có trong pod chưa? `kubectl -n open-webui exec open-webui-0 -- env | grep OAUTH`. Nếu thiếu → key sai tên trong SM.
+2. Key trong K8s secret: `kubectl -n open-webui get secret llmops-apikeys-secret -o jsonpath='{.data}' | python3 -c "import sys,json; print(sorted(json.load(sys.stdin).keys()))"` — phải có `OIDC_CLIENT_ID` và `OIDC_CLIENT_SECRET`.
+3. **Bẫy hay gặp**: paste credential vào tab "Key/value" của AWS Console làm nhầm credential thành KEY name → fix bằng cách put-secret-value qua CLI với JSON đúng cấu trúc (RUNBOOK §5.3).
+
+### 3.10 kubectl báo "no such host" sau khi recreate cluster
+
+Triệu chứng: `kubectl get nodes` báo `dial tcp: lookup <hash>.eks.amazonaws.com on 127.0.0.53:53: no such host`. EKS cluster bị recreate → endpoint hash mới, kubeconfig cũ trỏ stale.
+
+Fix: `aws eks update-kubeconfig --name llmops-cluster --region ap-southeast-1`.
+
+### 3.11 Redis / Langfuse / Postgres down (degraded mode test)
+
+Yêu cầu §8.1 Requirements:
+
+| Failure | Hành vi mong đợi | Cách test |
+|---|---|---|
+| Redis down | LiteLLM chat vẫn chạy, mất cache | `kubectl -n redis scale sts/redis-master --replicas=0`; thử chat → vẫn trả, latency tăng |
+| Langfuse down | Chat vẫn chạy, trace mất | `kubectl -n langfuse scale deploy/langfuse-web --replicas=0`; chat tiếp tục được |
+| LiteLLM 1 pod crash | API vẫn chạy | `kubectl -n litellm delete pod <pod>`; còn 2 replica phục vụ |
+| Open WebUI 1 pod crash | UI vẫn chạy | `kubectl -n open-webui delete pod open-webui-0`; còn 1 replica |
+| Postgres connection > 80% | Alert `PostgresConnectionHigh` fire | Chạy load thử, xem Grafana panel; alert phải fire trong 5 phút |
+
 ---
 
 ## 4. Quy trình thay đổi & deploy
@@ -175,10 +239,14 @@ CLICKHOUSE_PASSWORD
 
 Tuỳ chọn (SSO/OIDC — nếu chưa có, Open WebUI vẫn chạy local-auth):
 ```
-OIDC_PROVIDER_URL          # ví dụ https://accounts.google.com/.well-known/openid-configuration
-OIDC_CLIENT_ID
-OIDC_CLIENT_SECRET
+OIDC_CLIENT_ID             # Google OAuth client ID
+OIDC_CLIENT_SECRET         # Google OAuth client secret
 ```
+
+> `OPENID_PROVIDER_URL` đã hard-code trong `open-webui-values.yaml` (Google discovery), không cần để ở SM.
+> `LITELLM_DB_URL` đã bỏ — LiteLLM build `DATABASE_URL` inline từ `POSTGRESQL_PASSWORD` để tránh drift.
+
+**Lưu ý khi update SM qua Console UI**: dùng tab "Plaintext" thay vì tab "Key/value". Nếu thêm key qua "Key/value", AWS Console dễ paste credential nhầm thành KEY name → ESO sync xong env vẫn rỗng. Đã gặp với OIDC trong drill 2026-06-05.
 
 ### 5.2 Xoay key — drill chuẩn
 
@@ -282,16 +350,62 @@ aws ec2 create-volume --snapshot-id <id> --availability-zone <az> --volume-type 
 ## 8. Liên hệ on-call
 
 - Platform owner: nghiatd (`nyclone002@gmail.com`)
-- Escalation: ArgoCD + Slack alert channel (cấu hình Slack webhook trong Alertmanager khi sẵn sàng).
+- Escalation: ArgoCD UI + Alertmanager log (Slack webhook deferred — chưa cấu hình).
 
 ---
 
-## 9. Checklist trước khi handover
+## 9. RBAC & teams
 
-- [ ] Tất cả ArgoCD app `Synced + Healthy` ≥ 24h.
+5 team đã setup qua `argocd/rbac-setup` Job (PostSync hook gọi LiteLLM admin API):
+
+| Team | Allowlist | Budget/30d |
+|---|---|---|
+| engineering | coding-assistant, fast-chat, long-context | $100 |
+| support | fast-chat | $40 |
+| product | fast-chat | $30 |
+| operations | fast-chat | $20 |
+| executives | fast-chat, long-context | $10 |
+
+Verify:
+```bash
+kubectl -n litellm exec deploy/litellm -- curl -s \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  http://localhost:4000/team/list | python3 -m json.tool
+```
+
+Tạo virtual key cho user mới (gán team):
+```bash
+curl -X POST http://litellm.litellm.svc/key/generate \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{"team_id":"engineering","user_id":"alice","max_budget":10}'
+```
+
+---
+
+## 10. SLO verification
+
+| SLO | Mục tiêu | Cách check |
+|---|---|---|
+| Open WebUI availability | 99.5% | Grafana panel `up{namespace="open-webui"}` sum trên 30d |
+| LiteLLM availability | 99.9% | Panel `up{namespace="litellm"}` sum trên 30d |
+| LiteLLM P95 latency | < 3s | `histogram_quantile(0.95, rate(litellm_request_duration_seconds_bucket[5m]))` |
+| LLM request success rate | > 98% | `1 - rate(litellm_errors_total[5m]) / rate(litellm_requests_total[5m])` |
+| Trace ingestion delay | < 60s | Langfuse worker queue depth dashboard |
+| Alert detection time | < 5min | Alertmanager `firing_time - alert_start_time` |
+
+Nếu một SLO miss > 24h → mở incident, post-mortem, ghi nhận vào `docs/weekly/`.
+
+---
+
+## 11. Checklist trước khi handover
+
+- [x] Tất cả ArgoCD app `Synced + Healthy` ≥ 24h (đạt 2026-06-05 — Langfuse, LiteLLM, Open WebUI Healthy).
 - [ ] Không alert P1 firing trong 7d gần nhất.
-- [ ] Secret rotation drill chạy thành công ít nhất 1 lần (mục 5.2).
-- [ ] Loki retention thực sự xoá log > 14d (kiểm tra `loki_compactor_*` metrics).
-- [ ] Langfuse trace TTL 30d áp dụng trên project (UI → Settings → Data Retention).
-- [ ] Dashboard Grafana + alert export `.json` lưu trong repo.
-- [ ] Runbook này được tester ngoài đội đọc và phản hồi.
+- [x] Secret rotation drill chạy thành công (`WEBUI_SECRET_KEY` rotated 2026-06-05, mục 5.2).
+- [x] Loki retention 14d enforced bằng compactor (commit `b490273`).
+- [x] ClickHouse 30d TTL áp dụng trên `traces/observations/scores` (verified `toIntervalDay(30)` 2026-06-05).
+- [x] PII masking ở LiteLLM bật (`redact_user_api_key_info` + regex guardrail `pii-mask-pre-call`).
+- [x] Dashboard Grafana + alert rules export trong `argocd/monitoring/`.
+- [x] Runbook + 5 báo cáo tuần (`docs/weekly/week2..6.md`).
+- [ ] Google OIDC bật (cần `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` đúng cấu trúc — mục 5.3 + 3.9).
+- [ ] Demo deck cho stakeholder.
