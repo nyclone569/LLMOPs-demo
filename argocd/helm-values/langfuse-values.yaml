@@ -12,7 +12,7 @@ langfuse:
       key: LANGFUSE_SECRET_KEY
 
   nextauth:
-    url: "http://localhost:3000"  # Update to ALB DNS name after first deploy
+    url: "http://internal-llmops-langfuse-1207825939.ap-southeast-1.elb.amazonaws.com"
     secret:
       secretKeyRef:
         name: llmops-apikeys-secret
