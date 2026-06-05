@@ -139,9 +139,8 @@ config:
     # Coding Assistant - Engineering and code review
     - model_name: coding-assistant
       litellm_params:
-        model: anthropic/claude-sonnet-4-6
-        api_base: https://vip.digishop.work
-        api_key: os.environ/ANTHROPIC_API_KEY
+        model: gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
       model_info:
         mode: chat
         supports_function_calling: true

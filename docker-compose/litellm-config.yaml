@@ -33,15 +33,15 @@ model_list:
       
   - model_name: coding-assistant
     litellm_params:
-      model: claude-3-5-sonnet-20241022
-      api_key: os.environ/ANTHROPIC_API_KEY
-    model_info:
-      mode: chat
-      
-  - model_name: coding-assistant
-    litellm_params:
       model: gemini/gemini-2.0-flash-exp
       api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat
+
+  - model_name: claude-sonnet
+    litellm_params:
+      model: claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
     model_info:
       mode: chat
 
@@ -91,9 +91,11 @@ router_settings:
   num_retries: 2
   timeout: 60
   fallbacks:
-    - fast-chat: [fallback-model]
-    - coding-assistant: [fast-chat, fallback-model]
-    - long-context: [fast-chat]
+    - fast-chat: [claude-sonnet, private-chat]
+    - coding-assistant: [claude-sonnet, private-chat]
+    - long-context: [claude-sonnet, private-chat]
+    - fallback-model: [claude-sonnet, private-chat]
+    - claude-sonnet: [private-chat]
   allowed_fails: 3  # Number of fails before removing from rotation
   cooldown_time: 60  # Seconds before retry after failure
 
