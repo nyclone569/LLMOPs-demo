@@ -48,6 +48,16 @@ spec:
           querier:
             max_concurrent: 4
 
+          # Compactor enforces retention_period above — without it logs
+          # are queryable past 14d (only TSDB index ages out, chunks stay).
+          compactor:
+            working_directory: /var/loki/compactor
+            compaction_interval: 10m
+            retention_enabled: true
+            retention_delete_delay: 2h
+            retention_delete_worker_count: 150
+            delete_request_store: filesystem
+
         # Single binary deployment
         singleBinary:
           replicas: 1

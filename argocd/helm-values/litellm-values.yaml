@@ -43,12 +43,17 @@ env:
         name: llmops-apikeys-secret
         key: LITELLM_SALT_KEY
 
-  # Database URL for spend tracking and logging
-  - name: DATABASE_URL
+  # Database URL for spend tracking and logging.
+  # Build inline from POSTGRESQL_PASSWORD (the in-cluster Bitnami chart's
+  # actual password). Using a pre-baked URL from a separate Secrets Manager
+  # entry drifts whenever the postgres password rotates.
+  - name: POSTGRESQL_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: llmops-supabase-secret
-        key: LITELLM_DB_URL
+        name: llmops-apikeys-secret
+        key: POSTGRESQL_PASSWORD
+  - name: DATABASE_URL
+    value: "postgres://postgres:$(POSTGRESQL_PASSWORD)@postgresql-primary.postgresql.svc.cluster.local:5432/postgres"
 
   # Redis URL for caching
   - name: REDIS_HOST
@@ -284,9 +289,41 @@ config:
     # Logging
     json_logs: true
 
+    # Sensitive data masking — applied to both proxy logs and Langfuse traces.
+    # redact_user_api_key_info strips the user-supplied virtual key metadata
+    # from logs; redact_messages_in_exceptions prevents prompt content from
+    # leaking when LLM calls raise.
+    redact_user_api_key_info: true
+    redact_messages_in_exceptions: true
+    turn_off_message_logging: false
+
     # Request handling
     drop_params: true
     max_parallel_requests: 100
+
+  # Guardrails — regex-based PII masking applied pre-call so secrets/PII
+  # never reach upstream providers or observability sinks.
+  guardrails:
+    - guardrail_name: "pii-mask-pre-call"
+      litellm_params:
+        guardrail: regex
+        mode: "pre_call"
+        default_on: true
+        regex_rules:
+          - pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            replacement: "[EMAIL_REDACTED]"
+          - pattern: '\b(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}\b'
+            replacement: "[PHONE_REDACTED]"
+          - pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+            replacement: "[CARD_REDACTED]"
+          - pattern: '\b\d{3}-\d{2}-\d{4}\b'
+            replacement: "[SSN_REDACTED]"
+          - pattern: '(?i)(api[_-]?key|secret|token|password)["\s:=]+[A-Za-z0-9_\-\.]{16,}'
+            replacement: "[SECRET_REDACTED]"
+          - pattern: 'sk-[A-Za-z0-9]{20,}'
+            replacement: "[API_KEY_REDACTED]"
+          - pattern: 'AKIA[0-9A-Z]{16}'
+            replacement: "[AWS_KEY_REDACTED]"
 
   # General settings - budget, rate limits, auth
   general_settings:
