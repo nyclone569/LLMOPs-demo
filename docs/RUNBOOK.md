@@ -1,99 +1,99 @@
-# LLMOps Platform — Operator Runbook
+# LLMOps Platform - Operator Runbook
 
-Mục đích: hướng dẫn vận hành, xử lý sự cố và quy trình thường ngày cho platform LLMOps trên EKS.
+Purpose: operational guidance, incident response, and routine operating procedures for the LLMOps platform on EKS.
 
-- Cluster: `llmops-cluster` — region `ap-southeast-1` — account `492372116094`
-- GitOps: ArgoCD (sync tự động từ `main`)
-- Secrets: AWS Secrets Manager `llmops/apikeys` (chính), `llmops/supabase` (legacy — không còn dùng sau khi LiteLLM bỏ `LITELLM_DB_URL`)
+- Cluster: `llmops-cluster` - region `ap-southeast-1` - account `492372116094`
+- GitOps: ArgoCD (auto-syncs from `main`)
+- Secrets: AWS Secrets Manager `llmops/apikeys` (shared application keys)
 
 ---
 
-## 1. Truy cập & công cụ tiên quyết
+## 1. Access and prerequisites
 
 ```bash
-# Lấy kubeconfig
+# Get kubeconfig
 aws eks update-kubeconfig --region ap-southeast-1 --name llmops-cluster
 
 # Smoke test
 kubectl get nodes
 kubectl get applications -n argocd
 
-# Cổng ArgoCD UI
+# ArgoCD UI ingress
 kubectl get ingress -n argocd
 ```
 
-Yêu cầu local: `kubectl >= 1.29`, `helm >= 3.13`, `aws-cli v2`, IAM role có quyền `eks:DescribeCluster` + RBAC `system:masters` qua `aws-auth` ConfigMap.
+Local requirements: `kubectl >= 1.29`, `helm >= 3.13`, `aws-cli v2`, and an IAM role with `eks:DescribeCluster` plus `system:masters` RBAC via the `aws-auth` ConfigMap.
 
 ---
 
-## 2. Health check toàn platform (chạy hằng ngày)
+## 2. Full platform health check (run daily)
 
 ```bash
-# Tất cả ArgoCD apps phải Synced + Healthy
+# All ArgoCD apps should be Synced + Healthy
 kubectl get applications -n argocd -o wide
 
-# Pod không Running phải = 0
+# Non-running pods should be 0
 kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
 
-# HPA không có replica = 0
+# Check HPA state
 kubectl get hpa -A
 
-# Alert đang firing
+# Alerts currently firing
 kubectl exec -n monitoring sts/alertmanager-kube-prometheus-stack-alertmanager -- \
   amtool --alertmanager.url=http://localhost:9093 alert query
 ```
 
-Dashboards (qua Grafana ALB):
-- `LLMOps Overview` — request rate, error rate, latency p50/p95/p99 per model
-- `Cost Analysis` — spend per team/model, projection 30d
-- `Analytics` — token usage, fallback rate, cache hit ratio
-- `LLMOps Log Explorer` — Loki-backed live tail
+Dashboards (via Grafana ALB):
+- `LLMOps Overview` - request rate, error rate, latency p50/p95/p99 per model
+- `Cost Analysis` - spend per team/model, 30-day projection
+- `Analytics` - token usage, fallback rate, cache hit ratio
+- `LLMOps Log Explorer` - Loki-backed live tail
 
 ---
 
-## 3. Sự cố thường gặp
+## 3. Common incidents
 
-### 3.1 Open WebUI 502 / không vào được
+### 3.1 Open WebUI returns 502 / cannot be reached
 
 ```bash
 kubectl -n open-webui get pods
 kubectl -n open-webui logs deploy/open-webui --tail=200
 ```
 
-Nguyên nhân thường gặp:
-- ALB target group unhealthy → check `/health` trả 200.
-- Startup quá lâu → kéo dài `startupProbe.failureThreshold` trong `open-webui-values.yaml`.
-- Mất kết nối LiteLLM → check service `litellm.litellm.svc.cluster.local:4000` và NetworkPolicy.
+Common causes:
+- ALB target group unhealthy -> verify `/health` returns 200.
+- Startup is too slow -> increase `startupProbe.failureThreshold` in `open-webui-values.yaml`.
+- Lost connection to LiteLLM -> check service `litellm.litellm.svc.cluster.local:4000` and NetworkPolicy.
 
 ### 3.2 LiteLLM HPA runaway / pod evicted
 
-Triệu chứng: HPA scale lên trần, node `MemoryPressure`.
+Symptoms: HPA scales to the limit, node reports `MemoryPressure`.
 
 ```bash
 kubectl top pods -n litellm
 kubectl describe nodes | grep -A5 Allocated
 ```
 
-Khắc phục:
-1. Kiểm tra leak: `kubectl exec -n litellm <pod> -- curl localhost:4000/metrics | grep memory`.
-2. Tăng `resources.requests.memory` (đã pin `1100Mi`); cap `autoscaling.maxReplicas`.
-3. Cooldown bằng `kubectl rollout restart deploy/litellm -n litellm`.
+Mitigation:
+1. Check for leaks: `kubectl exec -n litellm <pod> -- curl localhost:4000/metrics | grep memory`.
+2. Increase `resources.requests.memory` (currently pinned at `1100Mi`); cap `autoscaling.maxReplicas`.
+3. Cool down with `kubectl rollout restart deploy/litellm -n litellm`.
 
-### 3.3 Langfuse trace không lên
+### 3.3 Langfuse traces do not appear
 
 ```bash
 kubectl -n langfuse logs deploy/langfuse-worker --tail=200 | grep -Ei 'error|s3|clickhouse'
 ```
 
 Checklist:
-- ClickHouse pod Ready? `kubectl -n langfuse get pod -l app.kubernetes.io/name=clickhouse`
-- Worker thấy `CLICKHOUSE_CLUSTER_ENABLED=false`?
-- Credential S3 đúng (cả `LANGFUSE_S3_*` lẫn `AWS_*`)?
-- `LANGFUSE_HOST` ở LiteLLM = `http://langfuse-web.langfuse.svc.cluster.local:3000`.
+- Is the ClickHouse pod Ready? `kubectl -n langfuse get pod -l app.kubernetes.io/name=clickhouse`
+- Does the worker see `CLICKHOUSE_CLUSTER_ENABLED=false`?
+- Are S3 credentials correct (`LANGFUSE_S3_*` and `AWS_*`)?
+- Is `LANGFUSE_HOST` in LiteLLM set to `http://langfuse-web.langfuse.svc.cluster.local:3000`?
 
-### 3.4 ClickHouse migrate hang
+### 3.4 ClickHouse migration hangs
 
-Nguyên nhân: Keeper init chưa xong hoặc bật `ON CLUSTER` ngoài single-node.
+Cause: Keeper init is not finished, or `ON CLUSTER` is enabled on a single-node setup.
 
 ```bash
 kubectl -n langfuse logs langfuse-clickhouse-0 -c clickhouse
@@ -101,126 +101,120 @@ kubectl -n langfuse exec langfuse-clickhouse-0 -- clickhouse-client \
   --query="SELECT * FROM system.zookeeper WHERE path='/'"
 ```
 
-Fix: đảm bảo env `CLICKHOUSE_CLUSTER_ENABLED=false` được set trong `langfuse-values.yaml`, restart worker.
+Fix: make sure `CLICKHOUSE_CLUSTER_ENABLED=false` is set in `langfuse-values.yaml`, then restart the worker.
 
-### 3.5 ArgoCD app `OutOfSync` không tự sync
+### 3.5 ArgoCD app stays `OutOfSync` and does not self-heal
 
 ```bash
-argocd app get <name>          # xem sync result
-argocd app sync <name> --prune  # force sync (chỉ khi đã review diff)
+argocd app get <name>           # inspect sync result
+argocd app sync <name> --prune  # force sync only after reviewing diff
 kubectl -n argocd logs deploy/argocd-application-controller --tail=200
 ```
 
-Nếu kẹt vì server-side apply conflict → xoá annotation tranh chấp hoặc `argocd app sync --replace`.
+If it is stuck on a server-side apply conflict, remove the conflicting annotation or run `argocd app sync --replace`.
 
-### 3.6 Loki query timeout / log không thấy
+### 3.6 Loki query times out / logs are missing
 
 ```bash
 kubectl -n loki logs sts/loki-loki --tail=200
 kubectl -n loki get pods
 ```
 
-- Promtail chạy đủ DaemonSet trên mọi node?
+- Is Promtail running as a DaemonSet on every node?
   `kubectl -n loki get pods -l app.kubernetes.io/name=promtail -o wide`
-- Path glob phải khớp containerd EKS (`/var/log/pods/*/*/*.log`).
-- Compactor enabled để hết hạn 14d (xem `loki.yaml`).
+- Does the path glob match EKS containerd logs (`/var/log/pods/*/*/*.log`)?
+- Is the compactor enabled for 14-day retention (see `loki.yaml`)?
 
-### 3.7 LiteLLM P1000 "Authentication failed" sau bootstrap fresh
+### 3.7 LiteLLM P1000 "Authentication failed" after a fresh bootstrap
 
-Triệu chứng: pod LiteLLM CrashLoop, log có `prisma db error … Authentication failed against database server`. Nguyên nhân: Bitnami PostgreSQL regenerate password mới khi PVC mới, nhưng `LITELLM_DB_URL` ở SM còn cứng password cũ.
+Symptoms: LiteLLM pods CrashLoop and logs show `prisma db error ... Authentication failed against database server`. Cause: Bitnami PostgreSQL regenerated a new password when a fresh PVC was created, but `LITELLM_DB_URL` in Secrets Manager still contained the old password.
 
-Đã fix permanently: `litellm-values.yaml` build `DATABASE_URL` từ env `POSTGRESQL_PASSWORD`. Nếu vẫn gặp:
-1. Verify cùng password: `kubectl -n postgresql exec postgresql-primary-0 -- bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres -c "SELECT 1"'`
-2. Rotate `POSTGRESQL_PASSWORD` ở AWS SM, force-sync ESO ở cả 3 namespace (postgresql, litellm, langfuse), rồi rollout `postgresql-primary` lẫn `litellm`.
+Permanent fix already applied: `litellm-values.yaml` builds `DATABASE_URL` from `POSTGRESQL_PASSWORD`. If this still happens:
+1. Verify the password matches: `kubectl -n postgresql exec postgresql-primary-0 -- bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres -c "SELECT 1"'`
+2. Rotate `POSTGRESQL_PASSWORD` in AWS Secrets Manager, force-sync ESO in all 3 namespaces (`postgresql`, `litellm`, `langfuse`), then roll out both `postgresql-primary` and `litellm`.
 
 ### 3.8 Langfuse migration P3009 deadlock
 
-Triệu chứng: pod langfuse-web CrashLoop, log Prisma báo `Error: P3009` + `deadlock detected … ExclusiveLock on advisory lock`. Nguyên nhân: 2 replica langfuse-web chạy `CREATE INDEX CONCURRENTLY` cùng lúc (migration `20240104210051_add_model_indices`).
+Symptoms: `langfuse-web` pods CrashLoop and Prisma logs show `Error: P3009` plus `deadlock detected ... ExclusiveLock on advisory lock`. Cause: 2 `langfuse-web` replicas run `CREATE INDEX CONCURRENTLY` at the same time (migration `20240104210051_add_model_indices`).
 
-Recovery (đã verify 2026-06-05):
+Recovery (verified on 2026-06-05):
 ```bash
-# 1. Scale 2 deployment về 0
+# 1. Scale both deployments down to 0
 kubectl -n langfuse scale deploy/langfuse-web --replicas=0
 kubectl -n langfuse scale deploy/langfuse-worker --replicas=0
 
-# 2. Đợi pod terminate xong, xoá row migration thất bại
+# 2. Wait for pod termination, then delete the failed migration row
 kubectl -n postgresql exec postgresql-primary-0 -- \
   bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres langfuse \
   -c "DELETE FROM _prisma_migrations WHERE finished_at IS NULL"'
 
-# 3. Patch HPA min về 1 (nếu không sẽ tự scale 2 → deadlock lại)
+# 3. Patch HPA minReplicas to 1 (otherwise it may scale back to 2 and deadlock again)
 kubectl -n langfuse patch hpa langfuse-web --type merge \
   -p '{"spec":{"minReplicas":1}}'
 
-# 4. Scale 1 replica, đợi Ready
+# 4. Scale to 1 replica and wait until Ready
 kubectl -n langfuse scale deploy/langfuse-web --replicas=1
 kubectl -n langfuse rollout status deploy/langfuse-web
 
-# 5. Khôi phục HPA min=2
+# 5. Restore HPA minReplicas=2
 kubectl -n langfuse patch hpa langfuse-web --type merge \
   -p '{"spec":{"minReplicas":2}}'
 kubectl -n langfuse scale deploy/langfuse-worker --replicas=2
 ```
 
-### 3.9 OIDC login không hiện nút Google
+### 3.9 OIDC login does not show the Google button
 
-Triệu chứng: refresh ALB Open WebUI vẫn chỉ thấy form email/password. `kubectl exec ... curl localhost:8080/api/config` trả `"oauth":{"providers":{}}` rỗng.
+Symptoms: refreshing the Open WebUI ALB still shows only the email/password form. `kubectl exec ... curl localhost:8080/api/config` returns an empty `"oauth":{"providers":{}}`.
 
 Checklist:
-1. Env `OAUTH_CLIENT_ID` có trong pod chưa? `kubectl -n open-webui exec open-webui-0 -- env | grep OAUTH`. Nếu thiếu → key sai tên trong SM.
-2. Key trong K8s secret: `kubectl -n open-webui get secret llmops-apikeys-secret -o jsonpath='{.data}' | python3 -c "import sys,json; print(sorted(json.load(sys.stdin).keys()))"` — phải có `OIDC_CLIENT_ID` và `OIDC_CLIENT_SECRET`.
-3. **Bẫy hay gặp**: paste credential vào tab "Key/value" của AWS Console làm nhầm credential thành KEY name → fix bằng cách put-secret-value qua CLI với JSON đúng cấu trúc (RUNBOOK §5.3).
+1. Is `OAUTH_CLIENT_ID` present in the pod? `kubectl -n open-webui exec open-webui-0 -- env | grep OAUTH`. If missing, the key name in Secrets Manager is wrong.
+2. Are the keys present in the Kubernetes secret? `kubectl -n open-webui get secret llmops-apikeys-secret -o jsonpath='{.data}' | python3 -c "import sys,json; print(sorted(json.load(sys.stdin).keys()))"` - it must include `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+3. Common trap: pasting the credential into the AWS Console "Key/value" tab can accidentally turn the credential into the key name. Fix it by using `put-secret-value` with the correct JSON structure (RUNBOOK section 5.4).
 
-### 3.10 kubectl báo "no such host" sau khi recreate cluster
+### 3.10 kubectl shows "no such host" after recreating the cluster
 
-Triệu chứng: `kubectl get nodes` báo `dial tcp: lookup <hash>.eks.amazonaws.com on 127.0.0.53:53: no such host`. EKS cluster bị recreate → endpoint hash mới, kubeconfig cũ trỏ stale.
+Symptoms: `kubectl get nodes` returns `dial tcp: lookup <hash>.eks.amazonaws.com on 127.0.0.53:53: no such host`. The EKS cluster was recreated, the endpoint hash changed, and the old kubeconfig still points to the stale endpoint.
 
 Fix: `aws eks update-kubeconfig --name llmops-cluster --region ap-southeast-1`.
 
-### 3.11 Redis / Langfuse / Postgres down (degraded mode test)
+### 3.11 Redis / Langfuse / Postgres down (degraded mode tests)
 
-Yêu cầu §8.1 Requirements:
+Required by Requirements section 8.1:
 
-| Failure | Hành vi mong đợi | Cách test |
+| Failure | Expected behavior | Test method |
 |---|---|---|
-| Redis down | LiteLLM chat vẫn chạy, mất cache | `kubectl -n redis scale sts/redis-master --replicas=0`; thử chat → vẫn trả, latency tăng |
-| Langfuse down | Chat vẫn chạy, trace mất | `kubectl -n langfuse scale deploy/langfuse-web --replicas=0`; chat tiếp tục được |
-| LiteLLM 1 pod crash | API vẫn chạy | `kubectl -n litellm delete pod <pod>`; còn 2 replica phục vụ |
-| Open WebUI 1 pod crash | UI vẫn chạy | `kubectl -n open-webui delete pod open-webui-0`; còn 1 replica |
-| Postgres connection > 80% | Alert `PostgresConnectionHigh` fire | Chạy load thử, xem Grafana panel; alert phải fire trong 5 phút |
+| Redis down | LiteLLM chat still works, cache is lost | `kubectl -n redis scale sts/redis-master --replicas=0`; send a chat request -> it should still respond, with higher latency |
+| Langfuse down | Chat still works, traces are lost | `kubectl -n langfuse scale deploy/langfuse-web --replicas=0`; chat should continue working |
+| One LiteLLM pod crashes | API remains available | `kubectl -n litellm delete pod <pod>`; the remaining 2 replicas should continue serving |
+| One Open WebUI pod crashes | UI remains available | `kubectl -n open-webui delete pod open-webui-0`; the other replica should continue serving |
+| Postgres connections > 80% | `PostgresConnectionHigh` alert fires | Run a load test, inspect the Grafana panel; alert should fire within 5 minutes |
 
 ---
 
-## 4. Quy trình thay đổi & deploy
+## 4. Change and deployment flow
 
-### 4.1 Deploy thay đổi thường
+### 4.1 Normal change deployment
 
-1. Branch from `main`, sửa Helm values hoặc manifest.
-2. `git push` → ArgoCD auto-sync (selfHeal + prune).
-3. Verify trên Grafana + `argocd app get <name>`.
+1. Branch from `main`, change Helm values or manifests, then push your branch.
+2. Open a PR and merge it into `main`.
+3. After `main` updates, ArgoCD auto-syncs (`selfHeal + prune`).
+4. Verify in Grafana and with `argocd app get <name>`.
 
-### 4.2 Rollback nhanh
+### 4.2 Fast rollback
 
 ```bash
 git revert <bad-commit> && git push
-# hoặc
+# or
 argocd app rollback <name> <revision>
-```
-
-### 4.3 Bật/tắt traffic-simulator
-
-Nằm ở `argocd/apps/traffic-simulator.yaml`. Suspend bằng:
-```bash
-argocd app set traffic-simulator --sync-policy none
 ```
 
 ---
 
-## 5. Bí mật & xoay key
+## 5. Secrets and key rotation
 
-### 5.1 Cấu trúc secret AWS SM
+### 5.1 AWS Secrets Manager structure
 
-`llmops/apikeys` (JSON) — bắt buộc:
+`llmops/apikeys` (JSON) - required:
 ```
 LITELLM_MASTER_KEY
 LITELLM_SALT_KEY
@@ -237,39 +231,39 @@ POSTGRESQL_PASSWORD
 CLICKHOUSE_PASSWORD
 ```
 
-Tuỳ chọn (SSO/OIDC — nếu chưa có, Open WebUI vẫn chạy local-auth):
+Optional (SSO/OIDC - if absent, Open WebUI still runs with local auth):
 ```
 OIDC_CLIENT_ID             # Google OAuth client ID
 OIDC_CLIENT_SECRET         # Google OAuth client secret
 ```
 
-> `OPENID_PROVIDER_URL` đã hard-code trong `open-webui-values.yaml` (Google discovery), không cần để ở SM.
-> `LITELLM_DB_URL` đã bỏ — LiteLLM build `DATABASE_URL` inline từ `POSTGRESQL_PASSWORD` để tránh drift.
+> `OPENID_PROVIDER_URL` is hard-coded in `open-webui-values.yaml` (Google discovery), so it does not need to live in Secrets Manager.
+> `LITELLM_DB_URL` has been removed - LiteLLM now builds `DATABASE_URL` inline from `POSTGRESQL_PASSWORD` to avoid drift.
 
-**Lưu ý khi update SM qua Console UI**: dùng tab "Plaintext" thay vì tab "Key/value". Nếu thêm key qua "Key/value", AWS Console dễ paste credential nhầm thành KEY name → ESO sync xong env vẫn rỗng. Đã gặp với OIDC trong drill 2026-06-05.
+**Important when updating Secrets Manager in the Console UI**: use the `Plaintext` tab, not `Key/value`. If you add keys through `Key/value`, AWS Console can accidentally paste the credential into the key name, and ESO will sync a secret with empty env vars. This happened during the OIDC drill on 2026-06-05.
 
-### 5.2 Xoay key — drill chuẩn
+### 5.2 Key rotation - standard drill
 
-Đã verify bằng `WEBUI_SECRET_KEY` rotation drill (2026-06-05): SM update → ESO refresh < 30s → StatefulSet rollout 2/2 Ready ~1.5 phút.
+Verified with a `WEBUI_SECRET_KEY` rotation drill on 2026-06-05: Secrets Manager update -> ESO refresh in under 30s -> StatefulSet rollout reaches 2/2 Ready in about 1.5 minutes.
 
-1. Tạo key mới ở provider (vd. OpenAI dashboard) hoặc generate locally:
+1. Create a new key at the provider (for example, the OpenAI dashboard) or generate one locally:
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(48))"
    ```
-2. Update SM theo luồng chuẩn §5.4 (thay value của key cần rotate).
-3. `kubectl rollout status` cho từng workload trước khi revoke key cũ ở provider.
+2. Update Secrets Manager using the standard flow in section 5.4 (replace the value of the key being rotated).
+3. Wait for `kubectl rollout status` on each affected workload before revoking the old provider-side key.
 
-### 5.3 Bật SSO/OIDC — Google Workspace
+### 5.3 Enable SSO/OIDC - Google Workspace
 
-Helm values `open-webui-values.yaml` đã hard-code `OPENID_PROVIDER_URL` của Google. Chỉ cần thêm 2 key vào AWS SM.
+`open-webui-values.yaml` already hard-codes Google's `OPENID_PROVIDER_URL`. You only need to add 2 keys to AWS Secrets Manager.
 
-1. **Google Cloud Console** → APIs & Services → Credentials → **Create OAuth client ID**:
+1. In **Google Cloud Console** -> APIs & Services -> Credentials -> **Create OAuth client ID**:
    - Application type: **Web application**
    - Name: `LLMOps Internal Chat`
    - Authorized redirect URIs: `http://internal-llmops-open-webui-54615089.ap-southeast-1.elb.amazonaws.com/oauth/oidc/callback`
-     (đổi sang `https://chat.<domain>/oauth/oidc/callback` khi có custom domain + ACM)
-2. Copy `Client ID` và `Client secret`.
-3. Thêm 2 key vào AWS SM theo luồng §5.4, edit step như sau:
+     (change this to `https://chat.<domain>/oauth/oidc/callback` once you have a custom domain and ACM)
+2. Copy the `Client ID` and `Client secret`.
+3. Add both keys to AWS Secrets Manager using the section 5.4 flow. Example edit step:
    ```bash
    python3 -c "
    import json
@@ -279,17 +273,17 @@ Helm values `open-webui-values.yaml` đã hard-code `OPENID_PROVIDER_URL` của 
    json.dump(d, open('/tmp/sm.json','w'))
    "
    ```
-4. Verify: vào ALB DNS (qua VPN) hoặc port-forward + localhost, login form hiện **Sign in with Google**.
+4. Verify by opening the ALB DNS name (through VPN) or using port-forward + localhost. The login form should show **Sign in with Google**.
 
-Restrict theo domain (tuỳ chọn): set env `OAUTH_ALLOWED_DOMAINS=company.com` trong helm values.
+Optional domain restriction: set env `OAUTH_ALLOWED_DOMAINS=company.com` in the Helm values.
 
-### 5.4 Cập nhật AWS Secrets Manager — luồng chuẩn
+### 5.4 Update AWS Secrets Manager - standard flow
 
-Quy trình áp dụng cho mọi thay đổi `llmops/apikeys`: thêm key mới, sửa value, xoay key, recover key bị mất. Tuân thủ để tránh 5 bẫy ở mục 5.5.
+This process applies to every change in `llmops/apikeys`: adding a new key, editing a value, rotating a key, or recovering a missing key. Follow it to avoid the 5 traps in section 5.5.
 
-**Nguyên tắc**: `put-secret-value` thay thế **toàn bộ** payload, không merge — luôn đọc trước, edit, push lại toàn bộ JSON.
+**Rule**: `put-secret-value` replaces the entire payload, it does not merge. Always read first, edit the full JSON payload, then push it back.
 
-#### Bước 1 — Đọc payload hiện tại + verify
+#### Step 1 - Read the current payload and verify
 
 ```bash
 aws secretsmanager get-secret-value --region ap-southeast-1 \
@@ -303,23 +297,23 @@ print('Total:', len(d))
 "
 ```
 
-#### Bước 2 — Edit JSON
+#### Step 2 - Edit the JSON
 
 ```bash
-# Cách A — Python one-liner cho 1 thay đổi
+# Option A - Python one-liner for one change
 python3 -c "
 import json
 d = json.load(open('/tmp/sm.json'))
-d['NEW_KEY'] = 'new_value'        # thêm/sửa
-# del d['OLD_KEY']                # xoá
+d['NEW_KEY'] = 'new_value'        # add / update
+# del d['OLD_KEY']                # delete
 json.dump(d, open('/tmp/sm.json','w'))
 "
 
-# Cách B — editor cho nhiều thay đổi
+# Option B - editor for multiple changes
 vim /tmp/sm.json
 ```
 
-#### Bước 3 — Verify bắt buộc trước khi push
+#### Step 3 - Mandatory verification before push
 
 ```bash
 python3 -c "
@@ -332,50 +326,50 @@ required = ['LITELLM_MASTER_KEY','LITELLM_SALT_KEY','WEBUI_SECRET_KEY',
             'REDIS_PASSWORD','POSTGRESQL_PASSWORD','CLICKHOUSE_PASSWORD']
 missing = [k for k in required if k not in d]
 print('Missing required:', missing)
-assert not missing, 'STOP — required keys missing, do not push'
+assert not missing, 'STOP - required keys missing, do not push'
 print('OK, safe to push. Keys:', sorted(d.keys()))
 "
 ```
 
-Nếu thấy `Missing required` → DỪNG, sửa lại file. Đừng push.
+If `Missing required` appears -> STOP, fix the file, do not push.
 
-#### Bước 4 — Push + force-sync ESO + rollout
+#### Step 4 - Push + force-sync ESO + rollout
 
 ```bash
-# 1. Push lên SM
+# 1. Push to Secrets Manager
 aws secretsmanager put-secret-value --region ap-southeast-1 \
   --secret-id llmops/apikeys --secret-string file:///tmp/sm.json \
   --query VersionId --output text
 
-# 2. Xoá temp file ngay
+# 2. Remove the temp file immediately
 rm /tmp/sm.json
 
-# 3. Force-sync ESO ở MỌI namespace dùng secret (loop)
+# 3. Force-sync ESO in EVERY namespace using this secret
 for ns in $(kubectl get externalsecret -A \
   -o jsonpath='{range .items[?(@.metadata.name=="llmops-apikeys-secret")]}{.metadata.namespace}{"\n"}{end}'); do
   kubectl annotate externalsecret -n $ns llmops-apikeys-secret \
     force-sync=$(date +%s) --overwrite
 done
 
-# 4. Đợi K8s secret cập nhật (nếu thêm key mới, check key đó)
+# 4. Wait for the Kubernetes secret to update (if you added a new key, check that key)
 until kubectl -n open-webui get secret llmops-apikeys-secret \
   -o jsonpath='{.data.NEW_KEY}' | grep -q .; do
   sleep 3
 done
 
-# 5. Rollout consumer
+# 5. Roll out consumers
 kubectl -n open-webui rollout restart statefulset/open-webui
 kubectl -n litellm   rollout restart deploy/litellm
 kubectl -n langfuse  rollout restart deploy/langfuse-web
 kubectl -n langfuse  rollout restart deploy/langfuse-worker
 
-# 6. Verify env trong pod
+# 6. Verify the env var in the pod
 kubectl -n open-webui exec open-webui-0 -- env | grep NEW_KEY
 ```
 
-#### Recovery — Khi lỡ overwrite mất key
+#### Recovery - when a key was accidentally overwritten
 
-Đã dùng để khôi phục `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` 2026-06-05.
+Used successfully to recover `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` on 2026-06-05.
 
 ```bash
 # 1. List versions
@@ -384,7 +378,7 @@ aws secretsmanager list-secret-version-ids --region ap-southeast-1 \
   --query 'Versions[*].{VersionId:VersionId,Stages:VersionStages,Created:CreatedDate}' \
   --output table
 
-# 2. Lấy version AWSPREVIOUS (chứa key đã mất)
+# 2. Get the AWSPREVIOUS version (contains the missing key)
 PREV_ID=$(aws secretsmanager list-secret-version-ids --region ap-southeast-1 \
   --secret-id llmops/apikeys --include-deprecated \
   --query 'Versions[?contains(VersionStages,`AWSPREVIOUS`)].VersionId' \
@@ -398,12 +392,12 @@ aws secretsmanager get-secret-value --region ap-southeast-1 \
   --secret-id llmops/apikeys \
   --query SecretString --output text > /tmp/curr.json
 
-# 3. Merge key thiếu từ prev → curr
+# 3. Merge missing keys from prev -> curr
 python3 -c "
 import json
 prev = json.load(open('/tmp/prev.json'))
 curr = json.load(open('/tmp/curr.json'))
-recover = ['OIDC_CLIENT_ID','OIDC_CLIENT_SECRET']   # đổi danh sách theo nhu cầu
+recover = ['OIDC_CLIENT_ID','OIDC_CLIENT_SECRET']   # adjust this list as needed
 for k in recover:
     if k in prev and k not in curr:
         curr[k] = prev[k]
@@ -411,63 +405,63 @@ for k in recover:
 json.dump(curr, open('/tmp/curr.json','w'))
 "
 
-# 4. Push merged + force-sync + rollout (lặp lại Bước 4 ở trên)
+# 4. Push merged payload + force-sync + rollout (repeat Step 4 above)
 aws secretsmanager put-secret-value --region ap-southeast-1 \
   --secret-id llmops/apikeys --secret-string file:///tmp/curr.json
 
 rm /tmp/prev.json /tmp/curr.json
 ```
 
-### 5.5 Bẫy hay gặp khi update SM
+### 5.5 Common traps when updating Secrets Manager
 
-| Bẫy | Triệu chứng | Phòng tránh |
+| Trap | Symptom | Prevention |
 |---|---|---|
-| Paste credential thành KEY name qua Console UI Key/value tab | ESO sync OK nhưng env trong pod thiếu biến (`grep OAUTH_CLIENT_ID` rỗng) | Luôn dùng CLI `put-secret-value` với JSON; nếu phải dùng Console thì chọn tab **Plaintext** không phải **Key/value** |
-| `put-secret-value` thay thế toàn bộ payload | Key cũ biến mất sau update (vd. lỡ tay nhập 2 key OIDC làm mất WEBUI_SECRET_KEY) | Luôn `get-secret-value` trước, edit JSON đầy đủ, rồi mới push |
-| Quên force-sync ESO | Pod restart vẫn dùng env cũ vì ESO chưa pull (chờ refresh interval 1h) | Loop annotate `force-sync=$(date +%s)` ở mọi namespace có ExternalSecret |
-| Rollout sau khi K8s secret chưa cập nhật | Pod mới vẫn đọc value cũ | Đợi `kubectl get secret ... | grep <new key>` xuất hiện rồi mới rollout |
-| Lưu `/tmp/sm.json` lâu | Credential lộ trên đĩa, log shell history | `rm` ngay sau khi push; xoá history nếu có lệnh chứa value |
+| Credential pasted as the KEY name in the Console UI `Key/value` tab | ESO sync succeeds, but env vars are missing in the pod (`grep OAUTH_CLIENT_ID` returns nothing) | Always use CLI `put-secret-value` with JSON; if you must use the Console, choose **Plaintext**, not **Key/value** |
+| `put-secret-value` replaces the whole payload | Old keys disappear after an update (for example, adding 2 OIDC keys and accidentally deleting `WEBUI_SECRET_KEY`) | Always `get-secret-value` first, edit the full JSON, then push |
+| Forgot to force-sync ESO | Pod restart still uses old env because ESO has not pulled yet (default refresh interval is 1h) | Loop over namespaces and annotate `force-sync=$(date +%s)` on every matching ExternalSecret |
+| Rolled out before the Kubernetes secret was updated | New pods still read the old value | Wait until `kubectl get secret ... | grep <new key>` shows the update before rollout |
+| `/tmp/sm.json` left on disk too long | Credentials remain exposed on disk or in shell history | `rm` it immediately after push; clear history if any command included raw secret values |
 
 ---
 
-## 6. Quản trị chi phí
+## 6. Cost operations
 
-- Budget toàn platform: `$6000 / 30d` (LiteLLM `general_settings.max_budget`).
-- Budget per team & model allowlist: PostSync Job `argocd/rbac-setup` (gọi LiteLLM admin API).
-- Theo dõi spend: dashboard *Cost Analysis* + alert `LLMTeamBudgetExceeded`, `LLMPlatformBudgetForecast`.
-- Khi alert budget firing: tạm thời tăng giới hạn qua admin API, mở ticket review usage.
+- Platform-wide budget: `$6000 / 30d` (LiteLLM `general_settings.max_budget`).
+- Per-team budget and model allowlist: PostSync job `argocd/rbac-setup` (calls the LiteLLM admin API).
+- Spend monitoring: `Cost Analysis` dashboard plus alerts `LLMTeamBudgetExceeded` and `LLMPlatformBudgetForecast`.
+- When a budget alert is firing: temporarily raise the limit via the admin API, then open a usage review ticket.
 
 ---
 
-## 7. Backup & DR
+## 7. Backup and disaster recovery
 
 | Asset | Mechanism | RPO |
 |---|---|---|
-| PostgreSQL | gp3 EBS snapshot daily (terraform-managed) | 24h |
-| Langfuse S3 traces | S3 versioning bật trên `llmops-langfuse-492372116094` | minutes |
-| ClickHouse | snapshot EBS volume (single node) | 24h |
-| ArgoCD config | Git là single source of truth | 0 |
+| PostgreSQL | Daily gp3 EBS snapshot (terraform-managed) | 24h |
+| Langfuse S3 traces | S3 versioning enabled on `llmops-langfuse-492372116094` | minutes |
+| ClickHouse | Single-node EBS volume snapshot | 24h |
+| ArgoCD config | Git is the single source of truth | 0 |
 
 Restore PostgreSQL:
 ```bash
-# Snapshot → volume → patch PVC → roll PG primary
+# Snapshot -> volume -> patch PVC -> roll PG primary
 aws ec2 create-volume --snapshot-id <id> --availability-zone <az> --volume-type gp3
 ```
 
 ---
 
-## 8. Liên hệ on-call
+## 8. On-call contacts
 
 - Platform owner: nghiatd (`nyclone002@gmail.com`)
-- Escalation: ArgoCD UI + Alertmanager log (Slack webhook deferred — chưa cấu hình).
+- Escalation path: ArgoCD UI + Alertmanager logs (Slack webhook deferred - not configured yet).
 
 ---
 
-## 9. RBAC & teams
+## 9. RBAC and teams
 
-5 team đã setup qua `argocd/rbac-setup` Job (PostSync hook gọi LiteLLM admin API):
+5 teams are provisioned by the `argocd/rbac-setup` job (PostSync hook calling the LiteLLM admin API):
 
-| Team | Allowlist | Budget/30d |
+| Team | Allowlist | Budget / 30d |
 |---|---|---|
 | engineering | coding-assistant, fast-chat, long-context | $100 |
 | support | fast-chat | $40 |
@@ -482,7 +476,7 @@ kubectl -n litellm exec deploy/litellm -- curl -s \
   http://localhost:4000/team/list | python3 -m json.tool
 ```
 
-Tạo virtual key cho user mới (gán team):
+Create a virtual key for a new user (assign to a team):
 ```bash
 curl -X POST http://litellm.litellm.svc/key/generate \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -493,28 +487,14 @@ curl -X POST http://litellm.litellm.svc/key/generate \
 
 ## 10. SLO verification
 
-| SLO | Mục tiêu | Cách check |
+| SLO | Target | How to check |
 |---|---|---|
-| Open WebUI availability | 99.5% | Grafana panel `up{namespace="open-webui"}` sum trên 30d |
-| LiteLLM availability | 99.9% | Panel `up{namespace="litellm"}` sum trên 30d |
+| Open WebUI availability | 99.5% | Grafana panel `up{namespace="open-webui"}` summed over 30d |
+| LiteLLM availability | 99.9% | Panel `up{namespace="litellm"}` summed over 30d |
 | LiteLLM P95 latency | < 3s | `histogram_quantile(0.95, rate(litellm_request_duration_seconds_bucket[5m]))` |
 | LLM request success rate | > 98% | `1 - rate(litellm_errors_total[5m]) / rate(litellm_requests_total[5m])` |
 | Trace ingestion delay | < 60s | Langfuse worker queue depth dashboard |
 | Alert detection time | < 5min | Alertmanager `firing_time - alert_start_time` |
 
-Nếu một SLO miss > 24h → mở incident, post-mortem, ghi nhận vào `docs/weekly/`.
+If any SLO is missed for more than 24h -> open an incident, write a postmortem, and record it in `docs/weekly/`.
 
----
-
-## 11. Checklist trước khi handover
-
-- [x] Tất cả ArgoCD app `Synced + Healthy` ≥ 24h (đạt 2026-06-05 — Langfuse, LiteLLM, Open WebUI Healthy).
-- [ ] Không alert P1 firing trong 7d gần nhất.
-- [x] Secret rotation drill chạy thành công (`WEBUI_SECRET_KEY` rotated 2026-06-05, mục 5.2).
-- [x] Loki retention 14d enforced bằng compactor (commit `b490273`).
-- [x] ClickHouse 30d TTL áp dụng trên `traces/observations/scores` (verified `toIntervalDay(30)` 2026-06-05).
-- [x] PII masking ở LiteLLM bật (`redact_user_api_key_info` + regex guardrail `pii-mask-pre-call`).
-- [x] Dashboard Grafana + alert rules export trong `argocd/monitoring/`.
-- [x] Runbook + 5 báo cáo tuần (`docs/weekly/week2..6.md`).
-- [ ] Google OIDC bật (cần `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET` đúng cấu trúc — mục 5.3 + 3.9).
-- [ ] Demo deck cho stakeholder.
