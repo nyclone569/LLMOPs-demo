@@ -41,3 +41,6 @@ terraform.rc
 
 # Ignore lock file
 .terraform.lock.hcl
+
+# Local git worktrees
+.worktrees/
