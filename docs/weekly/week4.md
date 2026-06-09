@@ -10,7 +10,7 @@
 | Helm charts cho deployment | Done | Open WebUI chart v14.6.0, Langfuse v1.0.0, Bitnami PostgreSQL/Redis, LiteLLM dùng chart local `argocd/helm-values/litellm-chart/` |
 | Kubernetes manifests | Done | `argocd/apps/` chứa 15 Application manifests, `argocd/manifests/` cho các resource phụ |
 | Environment-based configuration | Done | Terraform `terraform.tfvars` per layer; Helm values riêng cho mỗi service; env vars load qua `valueFrom.secretKeyRef` |
-| Secrets management | Done | **AWS Secrets Manager** (`llmops/apikeys`, `llmops/supabase`) → **External Secrets Operator** (IRSA) → K8s Secret `llmops-apikeys-secret` ở mỗi namespace; refresh interval 1h |
+| Secrets management | Done | **AWS Secrets Manager** (`llmops/apikeys`) → **External Secrets Operator** (IRSA) → K8s Secret `llmops-apikeys-secret` ở mỗi namespace; refresh interval 1h |
 | Ingress routing | Done | **AWS Load Balancer Controller** + ALB internal cho từng service (`llmops-open-webui`, `llmops-litellm`, `llmops-langfuse`, `llmops-loki`, `llmops-grafana`, ArgoCD public) |
 | GitOps deployment flow | Done | **ArgoCD App-of-Apps**: `root-app.yaml` quản lý mọi child Application; sync wave có thứ tự (storage → secrets → DB → services → monitoring); `automated: {prune, selfHeal}` |
 

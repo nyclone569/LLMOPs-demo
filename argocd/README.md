@@ -41,16 +41,14 @@ Before deploying, ensure you have:
    - Cert Manager installed (for TLS)
 
 2. **AWS Secrets Manager** with secrets:
-   - Secret containing: `OPENAI_API_KEY`, `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `REDIS_PASSWORD`, `WEBUI_SECRET_KEY`
-   - Secret containing: `LANGFUSE_DB_URL`, `LITELLM_DB_URL` (Supabase connection strings)
+   - Secret containing: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_S3_ACCESS_KEY_ID`, `LANGFUSE_S3_SECRET_ACCESS_KEY`, `REDIS_PASSWORD`, `POSTGRESQL_PASSWORD`, `CLICKHOUSE_PASSWORD`, `WEBUI_SECRET_KEY`
 
 3. **Kubernetes Secrets** synced by External Secrets:
-   - `llmops-apikeys-secret` (in each namespace)
-   - `llmops-supabase-secret` (in each namespace)
+   - `llmops-apikeys-secret` (in each namespace that needs shared credentials)
 
-4. **Supabase Cloud** PostgreSQL databases:
-   - Database for Langfuse
-   - Database for LiteLLM
+4. **In-cluster services**:
+   - PostgreSQL for Langfuse and LiteLLM metadata
+   - Redis for LiteLLM caching
 
 ## Configuration Steps
 
@@ -236,7 +234,6 @@ kubectl logs <pod-name> -n <namespace>
 
 # Check secrets
 kubectl get secret llmops-apikeys-secret -n <namespace>
-kubectl get secret llmops-supabase-secret -n <namespace>
 ```
 
 ### Ingress Not Working

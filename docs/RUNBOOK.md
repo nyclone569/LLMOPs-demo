@@ -127,7 +127,7 @@ kubectl -n loki get pods
 
 ### 3.7 LiteLLM P1000 "Authentication failed" after a fresh bootstrap
 
-Symptoms: LiteLLM pods CrashLoop and logs show `prisma db error ... Authentication failed against database server`. Cause: Bitnami PostgreSQL regenerated a new password when a fresh PVC was created, but `LITELLM_DB_URL` in Secrets Manager still contained the old password.
+Symptoms: LiteLLM pods CrashLoop and logs show `prisma db error ... Authentication failed against database server`. Cause: Bitnami PostgreSQL regenerated a new password when a fresh PVC was created, but the legacy pre-baked database URL no longer matched the chart-generated password.
 
 Permanent fix already applied: `litellm-values.yaml` builds `DATABASE_URL` from `POSTGRESQL_PASSWORD`. If this still happens:
 1. Verify the password matches: `kubectl -n postgresql exec postgresql-primary-0 -- bash -c 'PGPASSWORD=$POSTGRESQL_PASSWORD psql -U postgres -c "SELECT 1"'`
@@ -238,7 +238,7 @@ OIDC_CLIENT_SECRET         # Google OAuth client secret
 ```
 
 > `OPENID_PROVIDER_URL` is hard-coded in `open-webui-values.yaml` (Google discovery), so it does not need to live in Secrets Manager.
-> `LITELLM_DB_URL` has been removed - LiteLLM now builds `DATABASE_URL` inline from `POSTGRESQL_PASSWORD` to avoid drift.
+> LiteLLM now builds `DATABASE_URL` inline from `POSTGRESQL_PASSWORD` to avoid password drift between PostgreSQL and runtime configuration.
 
 **Important when updating Secrets Manager in the Console UI**: use the `Plaintext` tab, not `Key/value`. If you add keys through `Key/value`, AWS Console can accidentally paste the credential into the key name, and ESO will sync a secret with empty env vars. This happened during the OIDC drill on 2026-06-05.
 

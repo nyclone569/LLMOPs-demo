@@ -27,7 +27,7 @@ The goal is to build a production-style LLMOps stack that supports secure intern
 | LLM Providers            | Backend model providers                                  | OpenAI, Azure OpenAI, Gemini, Bedrock, Ollama, vLLM |
 | Prompt/LLM Observability | Trace prompts, responses, cost, latency, and errors      | Langfuse                                            |
 | Cache                    | Cache repeated LLM responses or session metadata         | Redis                                               |
-| Database                 | Store app metadata, users, prompts, traces               | PostgreSQL / Supabase                               |
+| Database                 | Store app metadata, users, prompts, traces               | PostgreSQL                                          |
 | Kubernetes Platform      | Run the whole stack                                      | GKE / EKS / generic Kubernetes                      |
 | Ingress                  | Expose UI and APIs securely                              | Nginx Ingress / Gateway API                         |
 | Secrets                  | Manage API keys and credentials                          | External Secrets / Vault / Kubernetes Secrets       |
