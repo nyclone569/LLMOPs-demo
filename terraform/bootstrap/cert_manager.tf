@@ -119,5 +119,5 @@ YAML
     EOF
   }
 
-  depends_on = [helm_release.cert_manager]
+  depends_on = [kubernetes_namespace.cert_manager, helm_release.cert_manager]
 }

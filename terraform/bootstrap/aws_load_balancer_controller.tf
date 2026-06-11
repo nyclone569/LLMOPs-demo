@@ -268,6 +268,13 @@ resource "helm_release" "aws_load_balancer_controller" {
   chart      = "aws-load-balancer-controller"
   version    = var.aws_load_balancer_controller_version
   namespace  = "kube-system"
+  wait = true
+  timeout = 600
+
+  set {
+    name = "enableServiceMutatorWebhook"
+    value = "false"
+  }
 
   set {
     name  = "clusterName"

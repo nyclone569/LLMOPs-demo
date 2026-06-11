@@ -190,7 +190,7 @@ config:
     - model_name: claude-sonnet
       litellm_params:
         model: anthropic/claude-sonnet-4-6
-        api_base: https://vip.digishop.work
+        api_base: https://fallback.viber.vn
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
@@ -198,7 +198,7 @@ config:
     - model_name: claude-haiku
       litellm_params:
         model: anthropic/claude-haiku-4-5-20251001
-        api_base: https://vip.digishop.work
+        api_base: https://fallback.viber.vn
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
