@@ -136,6 +136,14 @@ config:
       model_info:
         mode: chat
 
+    - model_name: fast-chat
+      litellm_params:
+        model: ollama/llama3.2
+        api_base: http://ollama.ollama.svc.cluster.local:11434
+        timeout: 300
+      model_info:
+        mode: chat
+
     # Coding Assistant - Engineering and code review
     - model_name: coding-assistant
       litellm_params:
@@ -148,8 +156,8 @@ config:
 
     - model_name: coding-assistant
       litellm_params:
-        model: gemini/gemini-2.0-flash
-        api_key: os.environ/GEMINI_API_KEY
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
       model_info:
         mode: chat
 
