@@ -56,22 +56,7 @@ spec:
   endpoints:
     - port: metrics
       path: /metrics
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: open-webui
-  namespace: monitoring
-  labels:
-    release: kube-prometheus-stack
-spec:
-  namespaceSelector:
-    matchNames:
-      - open-webui
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: open-webui
-  endpoints:
-    - port: http
-      path: /metrics
-      interval: 30s
+# Note: Open WebUI 0.9.5 has no native Prometheus /metrics endpoint —
+# only OpenTelemetry OTLP push (ENABLE_OTEL_METRICS). The dashboard
+# panel uses kube_pod_status_ready for liveness instead, so no
+# ServiceMonitor is needed here.

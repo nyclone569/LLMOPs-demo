@@ -168,26 +168,26 @@ data:
         },
         {
           "id": 10,
-          "title": "Open WebUI Up",
+          "title": "Open WebUI Ready Pods",
           "type": "stat",
           "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
           "targets": [
-            {"expr": "up{job=\"open-webui\"}", "legendFormat": "{{ pod }}"}
+            {"expr": "sum(kube_pod_status_ready{namespace=\"open-webui\",condition=\"true\"})", "legendFormat": "ready"}
           ],
           "fieldConfig": {
-            "defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}
+            "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
           }
         },
         {
           "id": 11,
-          "title": "Langfuse Up",
+          "title": "Langfuse Ready Pods",
           "type": "stat",
           "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28},
           "targets": [
-            {"expr": "up{job=\"langfuse\"}", "legendFormat": "{{ pod }}"}
+            {"expr": "sum(kube_pod_status_ready{namespace=\"langfuse\",condition=\"true\"})", "legendFormat": "ready"}
           ],
           "fieldConfig": {
-            "defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}
+            "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
           }
         },
         {
