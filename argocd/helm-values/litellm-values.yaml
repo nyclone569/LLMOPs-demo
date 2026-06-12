@@ -298,12 +298,25 @@ config:
     json_logs: true
 
     # Sensitive data masking — applied to both proxy logs and Langfuse traces.
-    # redact_user_api_key_info strips the user-supplied virtual key metadata
-    # from logs; redact_messages_in_exceptions prevents prompt content from
-    # leaking when LLM calls raise.
-    redact_user_api_key_info: true
+    # We keep non-sensitive virtual-key identifiers (user_id, team_alias, key
+    # alias, model) flowing into both Loki failure-path lines and Langfuse so
+    # that Requirements §5.1 (Langfuse user_id/team/model) and §5.3 (Loki
+    # search by user_id / model alias) are satisfied.
+    #
+    # standard_logging_payload_excluded_fields surgically removes the actually-
+    # sensitive virtual-key fields (email, key hash) so §7.3 (mask PII /
+    # secrets) still holds.
+    #
+    # redact_messages_in_exceptions stays on so prompt content cannot leak via
+    # tracebacks. turn_off_message_logging stays off so Langfuse keeps full
+    # prompt/response traces (which live behind admin-only Langfuse access per
+    # §7.1, separate from Loki ops logs per §7.3).
+    redact_user_api_key_info: false
     redact_messages_in_exceptions: true
     turn_off_message_logging: false
+    standard_logging_payload_excluded_fields:
+      - user_api_key_user_email
+      - user_api_key_hash
 
     # Request handling
     drop_params: true
