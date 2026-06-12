@@ -260,6 +260,10 @@ config:
       - claude-sonnet:    [private-chat]
     allowed_fails: 3
     cooldown_time: 60
+    retry_policy:
+      AuthenticationError: 0
+    allowed_fails_policy:
+      AuthenticationErrorAllowedFails: 1
 
   # Model-specific rate limits and timeouts
   model_settings:
