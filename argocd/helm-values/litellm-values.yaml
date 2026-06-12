@@ -303,20 +303,24 @@ config:
     # that Requirements §5.1 (Langfuse user_id/team/model) and §5.3 (Loki
     # search by user_id / model alias) are satisfied.
     #
-    # standard_logging_payload_excluded_fields surgically removes the actually-
-    # sensitive virtual-key fields (email, key hash) so §7.3 (mask PII /
-    # secrets) still holds.
+    # Known leak into Langfuse: user_api_key_hash (SHA-256 of the virtual key,
+    # not the upstream provider key) and user_api_key_user_email (currently
+    # empty — none of the virtual keys created by argocd/rbac-setup carry an
+    # email). LiteLLM's standard_logging_payload_excluded_fields setting is a
+    # no-op for the Langfuse callback (the langfuse integration reads
+    # litellm_params['metadata'] directly, not the StandardLoggingPayload), so
+    # we don't bother setting it. Mitigation per §7.1: Langfuse access is
+    # admin-only, separating these prompt traces from ops logs per §7.3. If
+    # virtual keys ever get user_email populated, see
+    # docs/superpowers/specs/2026-06-12-litellm-langfuse-metadata-scrubber-design.md
+    # for the deferred custom CustomLogger approach (Option B).
     #
     # redact_messages_in_exceptions stays on so prompt content cannot leak via
     # tracebacks. turn_off_message_logging stays off so Langfuse keeps full
-    # prompt/response traces (which live behind admin-only Langfuse access per
-    # §7.1, separate from Loki ops logs per §7.3).
+    # prompt/response traces.
     redact_user_api_key_info: false
     redact_messages_in_exceptions: true
     turn_off_message_logging: false
-    standard_logging_payload_excluded_fields:
-      - user_api_key_user_email
-      - user_api_key_hash
 
     # Request handling
     drop_params: true
