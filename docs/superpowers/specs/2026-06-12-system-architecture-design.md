@@ -542,19 +542,23 @@ executives:  [fast-chat, long-context]
 
 LiteLLM provides model aliasing, fallback chains, budget enforcement, rate limiting, Redis caching, and dual Langfuse/Prometheus callbacks out of the box. Building equivalent functionality from scratch would take weeks and introduce more surface area for bugs. The tradeoff is tight coupling to LiteLLM's release cadence — upgrading requires re-validating the config (e.g., the regex guardrail feature is deferred exactly because of this).
 
-### 9.2 Why Langfuse (vs. Prometheus-only tracing)
+### 9.2 Why Open WebUI (vs. building a custom chat UI)
+
+Open WebUI is a production-grade, actively maintained chat interface that speaks the OpenAI-compatible API natively. It handles session management, streaming responses, multi-model switching, and user authentication out of the box. Building an equivalent internal UI from scratch would divert significant effort from the platform infrastructure — and Open WebUI's configurable `OPENAI_BASE_API_URL` means it points at LiteLLM with a single environment variable change, keeping the gateway as the sole path to providers.
+
+### 9.3 Why Langfuse (vs. Prometheus-only tracing)
 
 Prometheus counters track *how many* requests succeeded or failed. Langfuse tracks *what was in them*: prompt content, response quality, per-user cost attribution, token breakdowns. These are different data types. Prometheus cannot store prompt text; Langfuse cannot replace time-series alerting. Both are needed.
 
-### 9.3 Why ArgoCD App-of-Apps (vs. Helm push from CI)
+### 9.4 Why ArgoCD App-of-Apps (vs. Helm push from CI)
 
 Push-based CI creates invisible drift — if someone manually patches a pod, CI won't notice until the next deploy. ArgoCD's self-healing loop (`selfHeal: true`) reverts unauthorised changes within seconds. The App-of-Apps pattern means a single `kubectl apply -f root-app.yaml` bootstraps the entire platform from a fresh cluster.
 
-### 9.4 Why Ollama In-Cluster (Optional Challenge Choice)
+### 9.5 Why Ollama In-Cluster (Optional Challenge Choice)
 
 The optional challenge was to add a local/private model backend. Ollama was chosen over vLLM because it runs on CPU (no GPU node required for a dev/demo cluster) and supports Llama 3.2 with minimal configuration. The in-cluster placement means the `private-chat` alias processes sensitive prompts entirely within the VPC — no data leaves AWS. As a bonus, Ollama serves as the final fallback for all aliases, keeping the platform functional even during a complete cloud provider outage.
 
-### 9.5 Known Limitations & Production Improvement Recommendations
+### 9.6 Known Limitations & Production Improvement Recommendations
 
 | Limitation | Production Recommendation |
 |---|---|
