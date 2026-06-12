@@ -108,6 +108,12 @@ extraEnvVars:
   - name: WEBUI_LOG_LEVEL
     value: "INFO"
 
+  # Prometheus metrics — exposes /metrics with FastAPI middleware.
+  # Without this, /metrics falls through to the SPA and returns HTML,
+  # so up{job="open-webui"} stays 0 in Prometheus.
+  - name: ENABLE_METRICS
+    value: "true"
+
   # SSO/OIDC Configuration — Google Workspace
   #
   # Provider URL is hard-coded to Google's discovery endpoint; only the
