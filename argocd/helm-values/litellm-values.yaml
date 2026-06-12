@@ -148,7 +148,7 @@ config:
     - model_name: coding-assistant
       litellm_params:
         model: claude-sonnet-4-6
-        api_base: https://fallback.viber.vn
+        api_base: https://vip.digishop.work
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
@@ -199,7 +199,7 @@ config:
     - model_name: claude-sonnet
       litellm_params:
         model: claude-sonnet-4-6
-        api_base: https://fallback.viber.vn
+        api_base: https://vip.digishop.work
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
@@ -207,7 +207,7 @@ config:
     - model_name: claude-haiku
       litellm_params:
         model: claude-haiku-4-5-20251001
-        api_base: https://fallback.viber.vn
+        api_base: https://vip.digishop.work
         api_key: os.environ/ANTHROPIC_API_KEY
       model_info:
         mode: chat
