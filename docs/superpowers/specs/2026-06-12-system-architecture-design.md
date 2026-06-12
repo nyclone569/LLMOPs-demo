@@ -37,34 +37,16 @@ This platform provides a secure, observable, and cost-governed internal LLM serv
 
 **Top-level architecture zones:**
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  USERS (290 employees — Engineering, Product, Support, Ops, Exec)   │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ HTTPS (internal corporate network only)
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  INTERNAL LOAD BALANCERS (AWS ALB — scheme: internal)               │
-│   • open-webui ALB  (chat portal)                                   │
-│   • litellm ALB     (API clients / service-to-service)              │
-│   • langfuse ALB    (admin observability)                           │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  APPLICATION LAYER (EKS — private subnets)                          │
-│   Open WebUI  →  LiteLLM Proxy  →  Redis Cache                     │
-│                      │                                              │
-│                 Langfuse (traces)   PostgreSQL (metadata)           │
-│                 Prometheus (metrics)  Loki (logs)                   │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ API calls (HTTPS, external)
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  MODEL PROVIDERS                                                    │
-│   OpenAI (GPT-4o, GPT-4o-mini)   Anthropic (Claude Sonnet/Haiku)   │
-│   Google (Gemini 2.0 Flash)      Ollama in-cluster (Llama 3.2)     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    U["👥 Users (290 employees)\nEngineering · Product · Support · Ops · Exec"]
+    ALB["Internal AWS ALBs\nopen-webui ALB · litellm ALB · langfuse ALB\nscheme: internal — no public exposure"]
+    APP["Application Layer — EKS Private Subnets\nOpen WebUI → LiteLLM Proxy → Redis Cache\nLangfuse (traces) · PostgreSQL (metadata)\nPrometheus/Grafana (metrics) · Loki (logs)"]
+    PROV["Model Providers\nOpenAI (GPT-4o, GPT-4o-mini) · Anthropic (Claude Sonnet/Haiku)\nGoogle (Gemini 2.0 Flash) · Ollama in-cluster (Llama 3.2)"]
+
+    U -->|"HTTPS — internal corporate network only"| ALB
+    ALB --> APP
+    APP -->|"API calls — HTTPS — external"| PROV
 ```
 
 ---
@@ -75,36 +57,36 @@ This platform provides a secure, observable, and cost-governed internal LLM serv
 
 Infrastructure is provisioned in three sequential Terraform layers, each storing state independently in S3 (`llmops-tfstate-492`). This separation means a change to the application layer (secrets, IAM) does not risk destroying the VPC or EKS cluster.
 
-```
-Layer 1: VPC module          (vpc/terraform.tfstate)
-  └─ VPC, private/public subnets, NAT Gateway, route tables
+```mermaid
+graph LR
+    L1["Layer 1 — VPC\nvpc/terraform.tfstate\nVPC · subnets · NAT Gateway · route tables"]
+    L2["Layer 2 — EKS\neks/terraform.tfstate\nEKS control plane · node groups · OIDC"]
+    L3A["Layer 3a — Bootstrap\nbootstrap/terraform.tfstate\nArgoCD · Ext Secrets Op · LB Controller\nEBS CSI · Cert Manager · Metrics Server"]
+    L3B["Layer 3b — App\napp/terraform.tfstate\nSecrets Manager shells · S3 · IRSA · namespaces"]
 
-Layer 2: EKS module          (eks/terraform.tfstate)
-  └─ EKS control plane, managed node groups, security groups, OIDC
-
-Layer 3a: Bootstrap          (bootstrap/terraform.tfstate)
-  └─ Add-ons: ArgoCD, External Secrets Operator, AWS LB Controller,
-     EBS CSI Driver, Cert Manager, Metrics Server
-
-Layer 3b: App                (app/terraform.tfstate)
-  └─ AWS Secrets Manager secret shells, S3 bucket (Langfuse blobs),
-     IRSA roles, namespaces
+    L1 -->|depends on| L2
+    L2 -->|depends on| L3A
+    L2 -->|depends on| L3B
 ```
 
 **Why this layering:** Layers 1 and 2 are long-lived and expensive to recreate. Separating them from Layer 3 allows iterating on application infrastructure without touching the network foundation.
 
 ### 2.2 Network Topology
 
-```
-AWS VPC
-├── Public Subnets (2 AZs)
-│     └── NAT Gateway (outbound internet for private nodes)
-│         Internet-facing ALB is NOT used — all ALBs are internal
-│
-└── Private Subnets (2 AZs)
-      ├── EKS Node Group (all workloads run here)
-      └── Internal ALBs (open-webui, litellm, langfuse)
-           — reachable only from within the VPC / corporate network
+```mermaid
+graph TD
+    subgraph VPC["AWS VPC"]
+        subgraph PUB["Public Subnets (2 AZs)"]
+            NAT["NAT Gateway\noutbound internet for private nodes"]
+        end
+        subgraph PRIV["Private Subnets (2 AZs)"]
+            EKS["EKS Node Group\nall workloads run here"]
+            ALBS["Internal ALBs\nopen-webui · litellm · langfuse\nreachable only within VPC / corporate network"]
+        end
+    end
+
+    NAT -->|outbound only| INTERNET["Internet\nprovider APIs · image pulls"]
+    ALBS --> EKS
 ```
 
 **Key decision — no public nodes:** EKS worker nodes sit entirely in private subnets. They reach the internet (for image pulls, provider API calls) via NAT Gateway. No node has a public IP. This prevents direct ingress to any pod.
@@ -132,22 +114,15 @@ Pods access AWS services (Secrets Manager, S3) without static credentials by ass
 
 A single root ArgoCD Application (`argocd/root-app.yaml`) watches `argocd/apps/` in Git. Each file in that directory is itself an ArgoCD Application pointing to a Helm chart with values from `argocd/helm-values/`. This gives one entry point that manages the entire platform.
 
-```
-Git: argocd/apps/
-  ├── llmops-project.yaml       ← ArgoCD AppProject (RBAC boundary)
-  ├── redis.yaml
-  ├── postgresql.yaml
-  ├── langfuse.yaml
-  ├── litellm.yaml
-  ├── open-webui.yaml
-  ├── ollama.yaml
-  ├── kube-prometheus-stack.yaml
-  ├── loki.yaml
-  ├── promtail.yaml
-  ├── monitoring.yaml           ← ServiceMonitors + PrometheusRules
-  ├── network-policies.yaml
-  ├── external-secrets/         ← ExternalSecret manifests
-  └── rbac-setup.yaml           ← LiteLLM team provisioning Job
+```mermaid
+graph TD
+    ROOT["root-app.yaml\nArgoCD Application\nwatches argocd/apps/"]
+
+    ROOT --> PROJ["llmops-project.yaml\nArgoCD AppProject — RBAC boundary"]
+    ROOT --> DATA["Data layer\nredis.yaml · postgresql.yaml"]
+    ROOT --> APP["Application layer\nlangfuse.yaml · litellm.yaml\nopen-webui.yaml · ollama.yaml"]
+    ROOT --> OBS["Observability layer\nkube-prometheus-stack.yaml\nloki.yaml · promtail.yaml · monitoring.yaml"]
+    ROOT --> INFRA["Platform layer\nnetwork-policies.yaml\nexternal-secrets/\nrbac-setup.yaml"]
 ```
 
 **Sync policy:** `automated.prune=true` + `selfHeal=true`. If someone manually changes a resource in the cluster, ArgoCD reverts it within seconds. If a resource is removed from Git, ArgoCD deletes it from the cluster.
@@ -171,34 +146,45 @@ Git: argocd/apps/
 
 NetworkPolicies restrict which namespaces can initiate connections to which. The intent is: only LiteLLM can reach PostgreSQL and Redis directly; Open WebUI can only reach LiteLLM.
 
-```
-open-webui     →  litellm         (port 4000, OpenAI-compatible API)
-litellm        →  postgresql      (port 5432, spend tracking / metadata)
-litellm        →  redis           (port 6379, response cache)
-litellm        →  langfuse        (port 3000, trace callbacks)
-litellm        →  ollama          (port 11434, private-chat model)
-langfuse       →  postgresql      (port 5432, metadata)
-langfuse       →  clickhouse      (port 9000, trace storage)
-monitoring     →  litellm         (port 4000, /metrics scrape)
-monitoring     →  redis           (port 9121, exporter scrape)
-monitoring     →  postgresql      (port 9187, exporter scrape)
-promtail       →  loki            (port 3100, log push)
+```mermaid
+graph LR
+    subgraph NETWORK["Network Policies — Allowed Paths"]
+        OW["open-webui"]
+        LL["litellm"]
+        PG["postgresql"]
+        RD["redis"]
+        LF["langfuse"]
+        OL["ollama"]
+        CH["clickhouse"]
+        MON["monitoring"]
+        PT["promtail"]
+        LK["loki"]
 
-DENIED (no policy allows):
-  open-webui  →  postgresql       (UI has no direct DB access)
-  open-webui  →  redis            (UI has no direct cache access)
-  open-webui  →  external APIs    (must go through LiteLLM)
-  *           →  external-secrets (operator only, no inbound)
+        OW -->|"4000 — OpenAI API"| LL
+        LL -->|"5432 — spend/metadata"| PG
+        LL -->|"6379 — response cache"| RD
+        LL -->|"3000 — trace callbacks"| LF
+        LL -->|"11434 — private-chat"| OL
+        LF -->|5432| PG
+        LF -->|"9000 — trace storage"| CH
+        MON -->|"4000 — /metrics scrape"| LL
+        MON -->|"9121 — exporter"| RD
+        MON -->|"9187 — exporter"| PG
+        PT -->|"3100 — log push"| LK
+    end
 ```
 
 ### 3.4 Deployment Timeline (Bootstrap Order)
 
-```
-1. terraform/app        — provision Secrets Manager shells, S3, IRSA
-2. terraform/bootstrap  — install ArgoCD + operators onto EKS
-3. Manually populate    — AWS Secrets Manager values (API keys, passwords)
-4. argocd/root-app      — apply once; ArgoCD takes over from here
-5. rbac-setup Job       — provisions LiteLLM teams + keys via admin API
+```mermaid
+graph LR
+    S1["1. terraform/app\nprovision Secrets Manager shells · S3 · IRSA"]
+    S2["2. terraform/bootstrap\ninstall ArgoCD + operators onto EKS"]
+    S3["3. Manual step\npopulate AWS Secrets Manager\nAPI keys · passwords"]
+    S4["4. kubectl apply root-app.yaml\nArgoCD takes over all deployments"]
+    S5["5. rbac-setup Job\nprovision LiteLLM teams + virtual keys\nvia admin API"]
+
+    S1 --> S2 --> S3 --> S4 --> S5
 ```
 
 ---
@@ -221,44 +207,52 @@ Aliases decouple users and apps from provider-specific model identifiers. The al
 
 ### 4.2 Request Flow (End-to-End)
 
-```
-User browser
-    │
-    │  HTTPS POST /api/chat
-    ▼
-Open WebUI pod
-    │
-    │  POST /v1/chat/completions  (OpenAI-compatible)
-    │  Authorization: Bearer <LITELLM_MASTER_KEY>
-    ▼
-Internal ALB  →  LiteLLM pod (one of 3 replicas)
-    │
-    ├─── 1. Auth check (master key / team virtual key)
-    ├─── 2. Team budget check (PostgreSQL spend table)
-    ├─── 3. Rate limit check (RPM/TPM per team)
-    ├─── 4. Redis cache lookup (hash of prompt + model)
-    │         HIT  ──→ return cached response immediately
-    │         MISS ──→ continue
-    ├─── 5. Route to alias backend (latency-based routing)
-    │         pick lowest-latency healthy provider for the alias
-    ├─── 6. Call provider API (OpenAI / Anthropic / Google / Ollama)
-    ├─── 7. Provider returns completion
-    ├─── 8. Write response to Redis cache (TTL 1h)
-    ├─── 9. Async callback → Langfuse (trace: tokens, cost, latency)
-    ├─── 10. Async callback → Prometheus (metrics: counters, histograms)
-    └─── 11. Return response to Open WebUI
+```mermaid
+sequenceDiagram
+    participant B as User Browser
+    participant W as Open WebUI
+    participant L as LiteLLM Pod
+    participant PG as PostgreSQL
+    participant RD as Redis
+    participant P as Provider API
+    participant LF as Langfuse
+    participant PM as Prometheus
+
+    B->>W: HTTPS POST /api/chat
+    W->>L: POST /v1/chat/completions\n(Bearer LITELLM_MASTER_KEY)
+    L->>L: 1. Auth check
+    L->>PG: 2. Team budget check
+    L->>L: 3. Rate limit check
+    L->>RD: 4. Cache lookup (hash of prompt+model)
+    alt Cache HIT
+        RD-->>L: cached response
+        L-->>W: response (fast path)
+    else Cache MISS
+        L->>P: 5. Route to lowest-latency backend\n(latency-based routing)
+        P-->>L: 7. completion
+        L->>RD: 8. Write to cache (TTL 1h)
+        L-->>LF: 9. Async trace (tokens, cost, latency)
+        L-->>PM: 10. Async metrics update
+        L-->>W: 11. Return response
+    end
+    W-->>B: streamed response
 ```
 
 ### 4.3 Fallback Chain
 
 If a provider returns errors or times out, LiteLLM retries (2 attempts) then falls back in order:
 
-```
-fast-chat       →  claude-sonnet  →  private-chat (llama3.2)
-coding-assistant→  claude-sonnet  →  private-chat
-long-context    →  claude-sonnet  →  private-chat
-claude-sonnet   →  private-chat
-private-chat    →  (no further fallback — last resort)
+```mermaid
+graph LR
+    FC["fast-chat"] -->|fallback 1| CS["claude-sonnet"]
+    CA["coding-assistant"] -->|fallback 1| CS
+    LC["long-context"] -->|fallback 1| CS
+    FM["fallback-model"] -->|fallback 1| CS
+    CS -->|fallback 2| PC["private-chat\nOllama/Llama 3.2\nin-cluster — last resort"]
+    FC -->|fallback 2 if claude-sonnet also fails| PC
+    CA -->|fallback 2| PC
+    LC -->|fallback 2| PC
+    FM -->|fallback 2| PC
 ```
 
 Failing providers enter a 60-second cooldown (`cooldown_time: 60`). A provider that fails 3 times (`allowed_fails: 3`) is temporarily excluded from routing.
@@ -305,18 +299,24 @@ ChatGPT-style web interface. Configured to speak the OpenAI-compatible API to Li
 
 LLM observability platform. Receives async callbacks from LiteLLM after every request.
 
-```
-LiteLLM callback
-    │
-    ▼
-Langfuse Worker (background processing)
-    ├── Writes trace metadata → PostgreSQL
-    ├── Writes prompt/response blobs → S3 (via IRSA)
-    └── Writes analytics events → ClickHouse (single-node)
+```mermaid
+graph TD
+    LF_CB["LiteLLM callback\nsuccess + failure"]
 
-Langfuse Web (query layer)
-    ├── Reads from PostgreSQL + ClickHouse
-    └── Serves admin UI (internal ALB)
+    subgraph Langfuse["Langfuse"]
+        LFW["Langfuse Worker\nasync processing"]
+        LFW_PG["PostgreSQL\ntrace metadata"]
+        LFW_S3["S3 via IRSA\nprompt/response blobs"]
+        LFW_CH["ClickHouse single-node\nanalytics events"]
+        LFWEB["Langfuse Web UI\ninternal ALB"]
+    end
+
+    LF_CB --> LFW
+    LFW --> LFW_PG
+    LFW --> LFW_S3
+    LFW --> LFW_CH
+    LFWEB --> LFW_PG
+    LFWEB --> LFW_CH
 ```
 
 **ClickHouse note:** Single-node deployment with `CLICKHOUSE_CLUSTER_ENABLED=false`. This disables `ON CLUSTER` DDL so migrations use `MergeTree` instead of `ReplicatedMergeTree`, which would hang on a single-keeper setup.
@@ -383,29 +383,35 @@ ServiceMonitors scrape:
 
 ### 6.2 Observability Flow Diagram
 
-```
-LiteLLM pod
-    │
-    ├── success_callback: ["langfuse", "prometheus"]
-    │       │                    │
-    │       ▼                    ▼
-    │   Langfuse worker      Prometheus
-    │   (async, HTTP)        (/metrics scrape, pull)
-    │       │                    │
-    │       ▼                    ▼
-    │   ClickHouse + S3      Grafana dashboards
-    │   (trace storage)      Alertmanager → PagerDuty/Slack
-    │
-    └── JSON logs → stdout
-            │
-            ▼
-        Promtail (DaemonSet, reads pod logs)
-            │
-            ▼
-        Loki (log storage + query)
-            │
-            ▼
-        Grafana (LogQL panels — search by trace_id, user_id, model)
+```mermaid
+graph TD
+    LL["LiteLLM pod"]
+
+    subgraph Push["Push — async callbacks"]
+        LF["Langfuse Worker\nasync HTTP"]
+        PM["Prometheus\n/metrics scrape pull"]
+    end
+
+    subgraph Storage["Storage"]
+        CH_S3["ClickHouse + S3\ntrace storage"]
+        GR["Grafana dashboards\nAlertmanager → Slack/PagerDuty"]
+    end
+
+    subgraph Logs["Log Pipeline"]
+        STDOUT["stdout — JSON logs"]
+        PT["Promtail DaemonSet\nreads pod logs"]
+        LK["Loki\nlog storage + query"]
+        GRLOGS["Grafana — LogQL panels\nsearch by trace_id · user_id · model"]
+    end
+
+    LL -->|success/failure callback| LF
+    LL -->|metrics endpoint| PM
+    LF --> CH_S3
+    PM --> GR
+    LL --> STDOUT
+    STDOUT --> PT
+    PT --> LK
+    LK --> GRLOGS
 ```
 
 ### 6.3 Alerting Rules
@@ -440,28 +446,18 @@ LiteLLM pod
 
 No secrets are committed to Git. The flow from creation to pod injection:
 
-```
-Engineer
-    │
-    │  aws secretsmanager put-secret-value
-    │  (manual, one-time; Terraform only creates the shell)
-    ▼
-AWS Secrets Manager
-  secret: llmops/apikeys
-  keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,
-        LITELLM_MASTER_KEY, LITELLM_SALT_KEY, LANGFUSE_PUBLIC_KEY,
-        LANGFUSE_SECRET_KEY, REDIS_PASSWORD, POSTGRESQL_PASSWORD,
-        WEBUI_SECRET_KEY, LANGFUSE_S3_ACCESS_KEY_ID, ...
-    │
-    │  ClusterSecretStore (IRSA — no static credentials)
-    │  ExternalSecret refreshInterval: 1h
-    ▼
-Kubernetes Secret: llmops-apikeys-secret
-  (synced into each namespace: litellm, langfuse, open-webui, redis, postgresql)
-    │
-    │  secretKeyRef in pod spec
-    ▼
-Pod environment variables
+```mermaid
+graph TD
+    ENG["Engineer\naws secretsmanager put-secret-value"]
+    SM["AWS Secrets Manager\nsecret: llmops/apikeys\nOPENAI_API_KEY · ANTHROPIC_API_KEY · GEMINI_API_KEY\nLITELLM_MASTER_KEY · LITELLM_SALT_KEY\nLANGFUSE keys · REDIS_PASSWORD\nPOSTGRESQL_PASSWORD · WEBUI_SECRET_KEY"]
+    ESO["External Secrets Operator\nClusterSecretStore via IRSA\nrefreshInterval: 1h"]
+    KS["Kubernetes Secret: llmops-apikeys-secret\nsynced into: litellm · langfuse · open-webui · redis · postgresql"]
+    POD["Pod environment variables\ninjected via secretKeyRef"]
+
+    ENG -->|"manual one-time populate"| SM
+    SM -->|"IRSA — no static credentials"| ESO
+    ESO --> KS
+    KS -->|secretKeyRef in pod spec| POD
 ```
 
 **Secret rotation procedure:** Update the value in AWS Secrets Manager. External Secrets Operator re-syncs within 1 hour (or trigger immediately via annotation). Pods pick up the new value on next restart; LiteLLM's master key rotation requires a rolling restart of the deployment.
@@ -470,12 +466,20 @@ Pod environment variables
 
 Enforced at the LiteLLM layer via team virtual keys. Each team is created with an explicit `models` allowlist. A request made with a team key for a model not in the allowlist returns HTTP 403.
 
-```
-engineering: [coding-assistant, fast-chat, long-context, private-chat]
-support:     [fast-chat]
-product:     [fast-chat]
-operations:  [fast-chat]
-executives:  [fast-chat, long-context]
+```mermaid
+graph TD
+    subgraph Models["Model Aliases"]
+        FC["fast-chat"]
+        CA["coding-assistant"]
+        PC["private-chat"]
+        LC["long-context"]
+    end
+
+    ENG["engineering"] --> FC & CA & PC & LC
+    SUP["support"] --> FC
+    PRD["product"] --> FC
+    OPS["operations"] --> FC
+    EXEC["executives"] --> FC & LC
 ```
 
 ### 7.3 Data Protection
