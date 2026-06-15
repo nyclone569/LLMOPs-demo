@@ -1,0 +1,38 @@
+{
+  "kpi_monthly_summary": {
+    "description": "Monthly aggregated revenue, trips, and AOV across all zones",
+    "tier": "kpi",
+    "columns": [
+      {"name": "month", "type": "date"},
+      {"name": "revenue", "type": "double"},
+      {"name": "trip_count", "type": "int64"},
+      {"name": "avg_fare", "type": "double"}
+    ],
+    "example_questions": ["show monthly revenue trend", "which month had the most trips"]
+  },
+  "fact_trips_daily": {
+    "description": "Daily trip grain with fare, distance, and zone identifiers",
+    "tier": "fact",
+    "columns": [
+      {"name": "trip_date", "type": "date"},
+      {"name": "vendor_id", "type": "int32"},
+      {"name": "pickup_zone_id", "type": "int32"},
+      {"name": "dropoff_zone_id", "type": "int32"},
+      {"name": "trip_count", "type": "int64"},
+      {"name": "total_fare", "type": "double"},
+      {"name": "avg_distance", "type": "double"}
+    ],
+    "example_questions": ["daily trips last month", "fare by pickup zone"]
+  },
+  "dim_zone": {
+    "description": "Zone dimension with borough and service zone labels",
+    "tier": "dim",
+    "columns": [
+      {"name": "zone_id", "type": "int32"},
+      {"name": "zone_name", "type": "varchar"},
+      {"name": "borough", "type": "varchar"},
+      {"name": "service_zone", "type": "varchar"}
+    ],
+    "example_questions": ["list all boroughs", "zones in Manhattan"]
+  }
+}

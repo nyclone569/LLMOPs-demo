@@ -1,0 +1,1136 @@
+{
+  "dim_date": {
+    "description": "Dim Date \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "year",
+        "type": "int64"
+      },
+      {
+        "name": "month",
+        "type": "int64"
+      },
+      {
+        "name": "day",
+        "type": "int64"
+      },
+      {
+        "name": "day_of_week",
+        "type": "int64"
+      },
+      {
+        "name": "is_weekend",
+        "type": "bool"
+      },
+      {
+        "name": "is_holiday",
+        "type": "bool"
+      },
+      {
+        "name": "quarter",
+        "type": "int64"
+      },
+      {
+        "name": "week_of_year",
+        "type": "int64"
+      }
+    ],
+    "example_questions": []
+  },
+  "dim_payment_type": {
+    "description": "Dim Payment Type \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "payment_type_code",
+        "type": "int32"
+      },
+      {
+        "name": "description",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dim_rate_code": {
+    "description": "Dim Rate Code \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "rate_code_id",
+        "type": "int32"
+      },
+      {
+        "name": "description",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dim_vendor": {
+    "description": "Dim Vendor \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "vendor_id",
+        "type": "int32"
+      },
+      {
+        "name": "vendor_name",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dim_zone": {
+    "description": "Dim Zone \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "location_id",
+        "type": "int32"
+      },
+      {
+        "name": "borough",
+        "type": "string"
+      },
+      {
+        "name": "zone",
+        "type": "string"
+      },
+      {
+        "name": "service_zone",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dim_zone_grouped": {
+    "description": "Dim Zone Grouped \u2014 auto-generated, update manually",
+    "tier": "dim",
+    "columns": [
+      {
+        "name": "location_id",
+        "type": "int32"
+      },
+      {
+        "name": "zone",
+        "type": "string"
+      },
+      {
+        "name": "borough",
+        "type": "string"
+      },
+      {
+        "name": "service_zone",
+        "type": "string"
+      },
+      {
+        "name": "pickup_trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "trip_volume_tier",
+        "type": "string"
+      },
+      {
+        "name": "group_name",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dq_batch_metadata": {
+    "description": "Dq Batch Metadata \u2014 auto-generated, update manually",
+    "tier": "dq",
+    "columns": [
+      {
+        "name": "script_name",
+        "type": "string"
+      },
+      {
+        "name": "export_timestamp",
+        "type": "timestamp[ns]"
+      },
+      {
+        "name": "export_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "fact_trips_row_count",
+        "type": "int64"
+      },
+      {
+        "name": "dataset_count",
+        "type": "int32"
+      }
+    ],
+    "example_questions": []
+  },
+  "dq_row_count_trend": {
+    "description": "Dq Row Count Trend \u2014 auto-generated, update manually",
+    "tier": "dq",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "delta_from_7day_avg",
+        "type": "double"
+      },
+      {
+        "name": "anomaly_flag",
+        "type": "string"
+      }
+    ],
+    "example_questions": []
+  },
+  "dq_validation_summary": {
+    "description": "Dq Validation Summary \u2014 auto-generated, update manually",
+    "tier": "dq",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "total_trips",
+        "type": "int64"
+      },
+      {
+        "name": "zero_distance",
+        "type": "int64"
+      },
+      {
+        "name": "negative_fare",
+        "type": "int64"
+      },
+      {
+        "name": "invalid_passengers",
+        "type": "int64"
+      },
+      {
+        "name": "negative_tip",
+        "type": "int64"
+      },
+      {
+        "name": "total_less_than_fare",
+        "type": "int64"
+      }
+    ],
+    "example_questions": []
+  },
+  "fact_trips_borough": {
+    "description": "Fact Trips Borough \u2014 auto-generated, update manually",
+    "tier": "fact",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "fact_trips_daily": {
+    "description": "Fact Trips Daily \u2014 auto-generated, update manually",
+    "tier": "fact",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "total_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip_pct",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "total_passengers",
+        "type": "int64"
+      }
+    ],
+    "example_questions": []
+  },
+  "fact_trips_hourly": {
+    "description": "Hourly trip counts and fares aggregated across all zones",
+    "tier": "fact",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "pickup_hour",
+        "type": "int64"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "which hour has the most trips",
+      "peak hour revenue"
+    ]
+  },
+  "fact_trips_hourly_zone": {
+    "description": "Fact Trips Hourly Zone \u2014 auto-generated, update manually",
+    "tier": "fact",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "pickup_hour",
+        "type": "int64"
+      },
+      {
+        "name": "pickup_zone",
+        "type": "string"
+      },
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "total_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "dropoff_count",
+        "type": "int64"
+      }
+    ],
+    "example_questions": []
+  },
+  "kpi_borough_comparison": {
+    "description": "Revenue and trip counts broken down by NYC borough",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "trips",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "market_share_pct",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "revenue by borough",
+      "which borough has most trips"
+    ]
+  },
+  "kpi_daily_overview": {
+    "description": "Daily revenue, trips, and AOV for recent days",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "trips",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip_pct",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "unique_vendors",
+        "type": "int64"
+      },
+      {
+        "name": "utilization_rate",
+        "type": "decimal128(23, 1)"
+      }
+    ],
+    "example_questions": [
+      "daily overview",
+      "recent days summary"
+    ]
+  },
+  "kpi_monthly_summary": {
+    "description": "Monthly aggregated revenue, trips, and AOV across all zones",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "pickup_year",
+        "type": "int32"
+      },
+      {
+        "name": "pickup_month",
+        "type": "int32"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "total_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_trip_per_day",
+        "type": "decimal128(22, 1)"
+      },
+      {
+        "name": "prev_month_revenue",
+        "type": "double"
+      },
+      {
+        "name": "mom_growth_pct",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "show monthly revenue trend",
+      "which month had the most trips"
+    ]
+  },
+  "kpi_payment_trends": {
+    "description": "Payment type breakdown (cash, card, etc.) by period",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "payment_type",
+        "type": "int32"
+      },
+      {
+        "name": "payment_desc",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip_pct",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "payment type breakdown",
+      "how do passengers pay"
+    ]
+  },
+  "kpi_vendor_performance": {
+    "description": "Trip count and revenue by taxi vendor",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "vendor_id",
+        "type": "int32"
+      },
+      {
+        "name": "vendor_name",
+        "type": "string"
+      },
+      {
+        "name": "trips",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "market_share_pct",
+        "type": "decimal128(24, 1)"
+      }
+    ],
+    "example_questions": [
+      "vendor performance",
+      "which vendor has most trips"
+    ]
+  },
+  "kpi_weekly_trends": {
+    "description": "Weekly revenue, trip count, and AOV trends",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "year",
+        "type": "int64"
+      },
+      {
+        "name": "week",
+        "type": "int64"
+      },
+      {
+        "name": "week_start",
+        "type": "date32[day]"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "prev_week_trips",
+        "type": "int64"
+      },
+      {
+        "name": "trip_growth_pct",
+        "type": "decimal128(23, 1)"
+      },
+      {
+        "name": "revenue_growth_pct",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "show weekly trip count",
+      "weekly revenue trend"
+    ]
+  },
+  "kpi_zone_net_flow": {
+    "description": "Kpi Zone Net Flow \u2014 auto-generated, update manually",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "zone",
+        "type": "string"
+      },
+      {
+        "name": "borough",
+        "type": "string"
+      },
+      {
+        "name": "pickups",
+        "type": "int64"
+      },
+      {
+        "name": "dropoffs",
+        "type": "int64"
+      },
+      {
+        "name": "net_flow",
+        "type": "int64"
+      },
+      {
+        "name": "net_flow_ratio",
+        "type": "decimal128(22, 1)"
+      },
+      {
+        "name": "imbalance_score",
+        "type": "decimal128(22, 1)"
+      },
+      {
+        "name": "primary_inflow_source",
+        "type": "string"
+      },
+      {
+        "name": "primary_outflow_dest",
+        "type": "string"
+      },
+      {
+        "name": "pickup_revenue",
+        "type": "double"
+      },
+      {
+        "name": "dropoff_revenue",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "kpi_zone_performance": {
+    "description": "Revenue, trips, and AOV per zone",
+    "tier": "kpi",
+    "columns": [
+      {
+        "name": "location_id",
+        "type": "int32"
+      },
+      {
+        "name": "zone",
+        "type": "string"
+      },
+      {
+        "name": "borough",
+        "type": "string"
+      },
+      {
+        "name": "pickups",
+        "type": "int64"
+      },
+      {
+        "name": "dropoffs",
+        "type": "int64"
+      },
+      {
+        "name": "net_flow",
+        "type": "int64"
+      },
+      {
+        "name": "net_flow_ratio",
+        "type": "decimal128(22, 1)"
+      },
+      {
+        "name": "pickup_revenue",
+        "type": "double"
+      },
+      {
+        "name": "dropoff_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip_pct",
+        "type": "double"
+      },
+      {
+        "name": "airport_trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "airport_trip_pct",
+        "type": "decimal128(24, 1)"
+      }
+    ],
+    "example_questions": [
+      "zone performance by revenue",
+      "top zones by fare"
+    ]
+  },
+  "od_borough_matrix": {
+    "description": "Od Borough Matrix \u2014 auto-generated, update manually",
+    "tier": "fact",
+    "columns": [
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "dropoff_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "total_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "pct_of_total",
+        "type": "decimal128(24, 1)"
+      }
+    ],
+    "example_questions": []
+  },
+  "ops_passenger_count_pattern": {
+    "description": "Ops Passenger Count Pattern \u2014 auto-generated, update manually",
+    "tier": "ops",
+    "columns": [
+      {
+        "name": "passenger_count",
+        "type": "int32"
+      },
+      {
+        "name": "pickup_hour",
+        "type": "int64"
+      },
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "ops_peak_hours_heatmap": {
+    "description": "Trip count by hour-of-day and day-of-week for heatmap display",
+    "tier": "ops",
+    "columns": [
+      {
+        "name": "pickup_hour",
+        "type": "int64"
+      },
+      {
+        "name": "day_of_week",
+        "type": "int64"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "show peak hour heatmap",
+      "busy hours by day"
+    ]
+  },
+  "ops_trip_distance_distribution": {
+    "description": "Ops Trip Distance Distribution \u2014 auto-generated, update manually",
+    "tier": "ops",
+    "columns": [
+      {
+        "name": "distance_bucket",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_total",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "ops_utilization_rate": {
+    "description": "Ops Utilization Rate \u2014 auto-generated, update manually",
+    "tier": "ops",
+    "columns": [
+      {
+        "name": "pickup_date",
+        "type": "date32[day]"
+      },
+      {
+        "name": "total_trips",
+        "type": "int64"
+      },
+      {
+        "name": "tipped_trips",
+        "type": "int64"
+      },
+      {
+        "name": "tip_rate_pct",
+        "type": "decimal128(24, 1)"
+      },
+      {
+        "name": "multi_passenger_trips",
+        "type": "int64"
+      },
+      {
+        "name": "multi_passenger_pct",
+        "type": "decimal128(24, 1)"
+      },
+      {
+        "name": "avg_passengers",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "route_airport_analysis": {
+    "description": "Route Airport Analysis \u2014 auto-generated, update manually",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "direction",
+        "type": "string"
+      },
+      {
+        "name": "airport",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip_pct",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "route_airport_zone_matrix": {
+    "description": "Route Airport Zone Matrix \u2014 auto-generated, update manually",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "airport_zone",
+        "type": "string"
+      },
+      {
+        "name": "residential_zone",
+        "type": "string"
+      },
+      {
+        "name": "borough",
+        "type": "string"
+      },
+      {
+        "name": "trips",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "peak_hour",
+        "type": "int32"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "route_cross_borough": {
+    "description": "Route Cross Borough \u2014 auto-generated, update manually",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "dropoff_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "route_popular_routes": {
+    "description": "Most frequent pickup-to-dropoff zone pairs by trip count",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "pickup_zone",
+        "type": "string"
+      },
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "dropoff_zone",
+        "type": "string"
+      },
+      {
+        "name": "dropoff_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      },
+      {
+        "name": "avg_tip",
+        "type": "double"
+      }
+    ],
+    "example_questions": [
+      "most popular routes",
+      "top pickup to dropoff zones"
+    ]
+  },
+  "route_top_dropoff_zones": {
+    "description": "Route Top Dropoff Zones \u2014 auto-generated, update manually",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "dropoff_zone",
+        "type": "string"
+      },
+      {
+        "name": "dropoff_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  },
+  "route_top_pickup_zones": {
+    "description": "Route Top Pickup Zones \u2014 auto-generated, update manually",
+    "tier": "route",
+    "columns": [
+      {
+        "name": "pickup_zone",
+        "type": "string"
+      },
+      {
+        "name": "pickup_borough",
+        "type": "string"
+      },
+      {
+        "name": "trip_count",
+        "type": "int64"
+      },
+      {
+        "name": "revenue",
+        "type": "double"
+      },
+      {
+        "name": "avg_fare",
+        "type": "double"
+      },
+      {
+        "name": "avg_distance",
+        "type": "double"
+      }
+    ],
+    "example_questions": []
+  }
+}
