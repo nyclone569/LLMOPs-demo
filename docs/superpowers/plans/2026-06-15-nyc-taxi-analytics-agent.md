@@ -368,6 +368,17 @@ def test_validate_registry_raises_on_missing_description():
     with pytest.raises(ValueError, match="bad_table missing description"):
         validate_registry(registry)
 
+def test_validate_s3_paths_raises_on_missing_table(monkeypatch):
+    from analytics_agent.registry import validate_s3_paths
+    import boto3
+    registry = json.loads(Path("tests/fixtures/schema_registry.json").read_text())
+    # Mock S3 to report kpi_monthly_summary as missing
+    def fake_list(Bucket, Prefix, MaxKeys):
+        return {"Contents": []} if "kpi_monthly_summary" in Prefix else {"Contents": [{"Key": Prefix}]}
+    monkeypatch.setattr("analytics_agent.registry._s3_list", fake_list)
+    with pytest.raises(ValueError, match="kpi_monthly_summary"):
+        validate_s3_paths(registry, bucket="test-bucket")
+
 def test_get_table_schema_returns_slice():
     from analytics_agent.registry import get_table_schema
     registry = json.loads(Path("tests/fixtures/schema_registry.json").read_text())
@@ -392,6 +403,7 @@ Expected: FAIL — `analytics_agent.registry` not found.
 
 ```python
 import json
+import boto3
 from pathlib import Path
 
 def load_registry(path: str) -> dict:
@@ -409,6 +421,19 @@ def validate_registry(registry: dict) -> None:
             raise ValueError(f"{table} missing {missing}")
         if entry["tier"] not in valid_tiers:
             raise ValueError(f"{table} has invalid tier: {entry['tier']}")
+
+def _s3_list(Bucket: str, Prefix: str, MaxKeys: int) -> dict:
+    s3 = boto3.client("s3")
+    return s3.list_objects_v2(Bucket=Bucket, Prefix=Prefix, MaxKeys=MaxKeys)
+
+def validate_s3_paths(registry: dict, bucket: str) -> None:
+    missing = []
+    for table in registry:
+        resp = _s3_list(Bucket=bucket, Prefix=f"{table}/", MaxKeys=1)
+        if not resp.get("Contents"):
+            missing.append(table)
+    if missing:
+        raise ValueError(f"Tables missing from S3 bucket '{bucket}': {missing}")
 
 def get_table_schema(registry: dict, table: str) -> dict:
     if table not in registry:
@@ -885,7 +910,7 @@ Append to the existing file (keep validator code, add below):
 import signal
 from dataclasses import dataclass
 from analytics_agent.ollama_client import chat, strip_fences
-from analytics_agent.registry import get_table_schema, registry_as_prompt_text
+from analytics_agent.registry import get_table_schema
 from analytics_agent.config import S3_BUCKET, DUCKDB_TIMEOUT, ROW_CAP
 
 QUERY_SYSTEM_PROMPT = """You are a SQL query agent for NYC yellow cab trip analytics stored in Parquet files on S3.
@@ -923,10 +948,11 @@ def _execute_duckdb(sql: str, table: str) -> list[dict]:
         conn = duckdb.connect()
         conn.execute("INSTALL httpfs; LOAD httpfs;")
         conn.execute("SET s3_region='ap-southeast-1';")
-        # Use instance profile credentials (no static keys)
         conn.execute("SET s3_use_credential_chain=true;")
-        view_sql = sql.replace(table, f"read_parquet('{path}')")
-        result = conn.execute(view_sql).fetchdf()
+        # Register the parquet path as a view so the validated SQL (which uses the
+        # bare table name) runs unchanged — read_parquet() is never in the SQL string.
+        conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
+        result = conn.execute(sql).fetchdf()
         return result.to_dict(orient="records")
     finally:
         signal.alarm(0)
@@ -1066,6 +1092,8 @@ def test_summarize_rejects_invalid_chart_type():
     with patch("analytics_agent.agents.summarize.chat", _mock_chat(output)):
         result = run_summarize_agent("show revenue", ROWS, capped=False)
     assert result.chart_spec is None
+    assert result.chart_invalid_reason is not None
+    assert "scatter" in result.chart_invalid_reason
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1233,6 +1261,15 @@ def test_pipeline_log_has_correlation_id():
          patch("analytics_agent.pipeline.run_summarize_agent", return_value=_make_summarize()):
         result = run_pipeline("show monthly revenue", REGISTRY)
     assert result.log["correlation_id"] == result.correlation_id
+
+def test_pipeline_returns_error_on_ollama_unavailable():
+    from analytics_agent.ollama_client import OllamaError
+    with patch("analytics_agent.pipeline.run_supervisor", side_effect=OllamaError("timed out")):
+        result = run_pipeline("show monthly revenue", REGISTRY)
+    assert result.error is not None
+    assert "timed out" in result.error
+    assert result.summary is None
+    assert result.log["outcome"] == "error"
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1648,8 +1685,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 from analytics_agent.config import SCHEMA_REGISTRY_PATH
-from analytics_agent.registry import load_registry, validate_registry
+from analytics_agent.registry import load_registry, validate_registry, validate_s3_paths
 from analytics_agent.pipeline import run_pipeline
+from analytics_agent.config import S3_BUCKET
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -1657,6 +1695,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 def get_registry():
     registry = load_registry(SCHEMA_REGISTRY_PATH)
     validate_registry(registry)
+    validate_s3_paths(registry, bucket=S3_BUCKET)
     return registry
 
 def render_chart(chart_spec: dict, rows: list[dict]) -> None:
@@ -1714,10 +1753,9 @@ def main():
             st.info(result.clarification)
         elif result.summary:
             st.markdown(result.summary)
-            if result.chart_spec and result.log.get("query", {}).get("row_count", 0) > 0:
-                rows = []  # rows not stored in result — re-fetch from log is not possible
-                # chart_spec is validated; render placeholder message if no rows available
-                st.caption("Chart data not available in demo mode — connect pipeline rows through for full rendering.")
+            # rows are wired through PipelineResult in Task 14 — chart renders after that task
+            if result.chart_spec and hasattr(result, "rows") and result.rows:
+                render_chart(result.chart_spec, result.rows)
             st.caption(f"Correlation ID: `{result.correlation_id}`")
 
         with st.expander("Debug log"):
@@ -1726,8 +1764,6 @@ def main():
 if __name__ == "__main__":
     main()
 ```
-
-> **Note:** The pipeline result currently does not carry the raw rows through to the UI (they stay in the log). In Task 14 we wire the rows through `PipelineResult` so chart rendering works end-to-end.
 
 - [ ] **Step 2: Commit**
 
