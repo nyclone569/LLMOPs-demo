@@ -428,7 +428,7 @@ rm /tmp/prev.json /tmp/curr.json
 
 - Platform-wide budget: `$6000 / 30d` (LiteLLM `general_settings.max_budget`).
 - Per-team budget and model allowlist: PostSync job `argocd/rbac-setup` (calls the LiteLLM admin API).
-- Spend monitoring: `Cost Analysis` dashboard plus alerts `LLMTeamBudgetExceeded` and `LLMPlatformBudgetForecast`.
+- Spend monitoring: `Cost Analysis` dashboard plus alerts `DailyLLMCostSpike` (24h spend > $200) and `UserHighTokenConsumption` (one user > 30% of daily tokens).
 - When a budget alert is firing: temporarily raise the limit via the admin API, then open a usage review ticket.
 
 ---
