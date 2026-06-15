@@ -1,7 +1,7 @@
 import json, pytest
 from pathlib import Path
 
-FIXTURE = Path("tests/fixtures/schema_registry.json")
+FIXTURE = Path(__file__).parent / "fixtures" / "schema_registry.json"
 
 def test_registry_has_required_fields():
     registry = json.loads(FIXTURE.read_text())
