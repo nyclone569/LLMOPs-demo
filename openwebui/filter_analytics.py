@@ -64,12 +64,14 @@ def chart_spec_to_vegalite(chart_spec: dict, rows: list[dict]) -> dict:
     if chart_type == "pie":
         x_orient = {"sort": "-y"}
 
+    x_type = "temporal" if chart_type == "line" else "ordinal"
+
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
         "mark": mark,
         "data": {"values": rows},
         "encoding": {
-            "x": {"field": x_field, "type": "ordinal", **x_orient},
+            "x": {"field": x_field, "type": x_type, **x_orient},
             "y": {"field": y_field, "type": "quantitative"},
         },
         "width": "container",
@@ -87,6 +89,7 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
 
     vl_spec = chart_spec_to_vegalite(chart_spec, rows)
     spec_json = json.dumps(vl_spec)
+    spec_json = spec_json.replace("</", "<\\/")
 
     return f"""<!DOCTYPE html>
 <html>

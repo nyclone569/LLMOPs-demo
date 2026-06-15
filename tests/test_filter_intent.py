@@ -95,3 +95,10 @@ def test_chart_spec_to_vegalite_bar():
     assert spec["encoding"]["y"]["field"] == "revenue"
     assert spec["encoding"]["x"]["type"] == "ordinal"
     assert spec["encoding"]["y"]["type"] == "quantitative"
+
+
+def test_chart_spec_to_vegalite_line_uses_temporal():
+    spec = chart_spec_to_vegalite({"type": "line", "x": "date", "y": "trip_count"}, [{"date": "2023-01", "trip_count": 500}])
+    assert spec["mark"] == "line"
+    assert spec["encoding"]["x"]["type"] == "temporal"
+    assert spec["encoding"]["y"]["type"] == "quantitative"
