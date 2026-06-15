@@ -65,17 +65,18 @@ The Filter uses Open WebUI's `Valves` config mechanism to store the registry pat
 
 ### Calling the Pipeline
 
-```python
-from analytics_agent.pipeline import run_pipeline
+The Filter inlines the three-agent logic directly (no `analytics_agent` import). LLM calls use `httpx` to the Ollama API. DuckDB is declared as a pip dependency in the Filter's `requirements` docstring.
 
-result = run_pipeline(question=message, registry=self.registry)
-```
+Flow mirrors `analytics_agent/pipeline.py`:
+1. Supervisor: select table from registry via Ollama
+2. Query agent: generate + validate + execute SQL via DuckDB + S3/httpfs
+3. Summarize agent: generate summary + chart_spec via Ollama
 
-`PipelineResult` fields used:
-- `result.summary` — markdown text, rendered as normal chat
-- `result.chart_spec` — Vega-Lite dict, wrapped in HTML artifact
-- `result.clarification` — returned as plain text (supervisor had low confidence on table selection)
-- `result.error` — returned as user-friendly error message
+Result fields used:
+- `summary` — markdown text, rendered as normal chat
+- `chart_spec` — custom schema dict, converted to Vega-Lite and wrapped in HTML artifact
+- `clarification` — returned as plain text (supervisor had low confidence)
+- `error` — returned as user-friendly error message
 
 ### Two-Layer Clarification
 
@@ -119,14 +120,23 @@ Rendered as normal chat markdown.
 
 Open WebUI detects `<!DOCTYPE html>` and renders the HTML block as an interactive Artifact card in the chat message. The summary text appears above it as normal markdown.
 
-### Chart types from existing summarize agent
+### chart_spec Schema Conversion
 
-| Type | Vega-Lite mark | Notes |
-|---|---|---|
-| `bar` | `bar` | categorical x, quantitative y |
-| `line` | `line` | temporal or ordered x, quantitative y |
-| `pie` | horizontal `bar` | Vega-Lite `arc` requires a separate view config; horizontal bar is simpler and more readable for small datasets |
-| `table` | — | no chart, text summary only |
+The summarize agent returns a **custom schema**, not a native Vega-Lite spec:
+```json
+{"type": "bar", "x": "month", "y": "revenue", "series": []}
+```
+
+The Filter converts this to a Vega-Lite spec before building the HTML artifact:
+
+| Custom type | Vega-Lite encoding |
+|---|---|
+| `bar` | `mark: "bar"`, x as ordinal, y as quantitative |
+| `line` | `mark: "line"`, x as ordinal/temporal, y as quantitative |
+| `pie` | `mark: "bar"` horizontal (simpler than `arc`, more readable for small datasets) |
+| `table` | no chart — summary text only |
+
+Multi-series charts (`series` field) are not supported in v1. `series` is always `[]` from the summarize agent and is ignored by the converter.
 
 ---
 
@@ -160,13 +170,16 @@ The Filter runs inside the Open WebUI pod. It needs access to `schema_registry.j
 
 ### analytics_agent Package
 
-The Filter imports `analytics_agent.pipeline`. This package must be importable inside the Open WebUI pod. Since Open WebUI Filters run in the same Python process as Open WebUI, the package needs to be installed into that environment.
+Open WebUI Functions run in a sandboxed Python environment. They can declare pip dependencies via a `requirements` docstring at load time, but cannot import from the host filesystem directly. Rather than packaging `analytics_agent` and managing a custom Open WebUI image, **the Filter is self-contained**:
 
-Options:
-- Add `analytics_agent` as a pip-installable package (add `pyproject.toml`, publish to private registry or install from Git)
-- Copy the `analytics_agent/` directory into a location on the Open WebUI pod's `PYTHONPATH`
+- `classify_intent()` is inlined (pure Python, zero deps)
+- LLM calls are made directly via `httpx` (already available in Open WebUI's environment) to the Ollama API at `http://ollama.ollama.svc.cluster.local:11434/v1/chat/completions`
+- DuckDB queries are executed via `duckdb` (declared in the Filter's `requirements` docstring — Open WebUI installs it at load time)
+- The three-agent logic (supervisor → query → summarize) is inlined into the Filter, following the same patterns as `analytics_agent/` but without the import dependency
 
-**Recommended:** Add `pyproject.toml` to make `analytics_agent` pip-installable, then add it to the Open WebUI pod's `extraInitContainers` or build a custom image with it pre-installed.
+This keeps the Filter as a readable, standalone artifact — appropriate for a portfolio project. The `analytics_agent/` package remains the authoritative implementation for testing and the Streamlit dev tool.
+
+**Schema registry** is bundled as a Python dict constant in the Filter file (Option A). No ConfigMap, no volume mount, no Helm changes.
 
 ---
 
@@ -174,9 +187,8 @@ Options:
 
 | File | Change |
 |---|---|
-| `openwebui/filter_analytics.py` | **New** — Open WebUI Filter |
-| `pyproject.toml` | **New** — makes `analytics_agent` pip-installable |
-| `argocd/helm-values/open-webui-values.yaml` | **Maybe** — only if Option B registry mount chosen |
+| `openwebui/filter_analytics.py` | **New** — self-contained Open WebUI Filter |
+| `argocd/helm-values/open-webui-values.yaml` | **No change** — Filter is loaded via admin panel, no Helm needed |
 
 ---
 
