@@ -498,3 +498,39 @@ curl -X POST http://litellm.litellm.svc/key/generate \
 
 If any SLO is missed for more than 24h -> open an incident, write a postmortem, and record it in `docs/weekly/`.
 
+---
+
+## 11. Alert Reference
+
+All Prometheus rules are defined in `argocd/monitoring/prometheus-rules.yaml`. Quick lookup for on-call.
+
+### llmops-platform (eval interval: 30s)
+
+| Alert | Condition | Severity |
+|---|---|---|
+| LiteLLMHighErrorRate | failure rate > 5% for 5m | critical |
+| LLMProviderHighTimeoutRate | timeout rate > 10% for 5m | warning |
+| OpenWebUIDown | up == 0 for 2m | critical |
+| LangfuseDown | up == 0 for 5m | warning |
+| LiteLLMHighLatency | P95 > 3s for 10m | warning |
+| RedisHighMemoryUsage | > 80% memory for 5m | warning |
+| RedisHighConnectionCount | > 1000 clients for 5m | warning |
+| PodRestartingFrequently | restart rate > 0.1/s over 15m window, for 5m (namespaces: litellm, langfuse, open-webui, redis) | warning |
+| PodHighCPUUsage | > 90% CPU limit for 10m | warning |
+| PodHighMemoryUsage | > 90% memory limit for 10m | warning |
+| NodeUnderPressure | MemoryPressure or DiskPressure for 5m | warning |
+| PostgreSQLHighConnectionUsage | > 80% of max_connections for 5m | warning |
+
+### llmops-cost-tracking (eval interval: 60s)
+
+| Alert | Condition | Severity |
+|---|---|---|
+| DailyLLMCostSpike | 24h spend > $200 | warning |
+| UserHighTokenConsumption | one user > 30% of daily tokens | warning |
+
+### llmops-security (eval interval: 30s)
+
+| Alert | Condition | Severity |
+|---|---|---|
+| UnusualRequestPattern | request rate > 2× hourly average for 10m | warning |
+
