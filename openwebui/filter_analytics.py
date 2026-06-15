@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 import json
 import re
-import signal
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 DOMAIN_TERMS = {
     "taxi", "trip", "trips", "fare", "borough", "zone", "pickup", "dropoff",
@@ -230,7 +230,7 @@ Rules:
 - Do not use read_parquet(), httpfs, or any file functions"""
 
 
-def _run_query(question: str, table: str, registry: dict, s3_bucket: str, ollama_url: str = OLLAMA_URL) -> dict:
+def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL) -> dict:
     """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
     col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
@@ -244,21 +244,24 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, ollama
 
     import duckdb
 
-    def _timeout(signum, frame):
-        raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
-
-    signal.signal(signal.SIGALRM, _timeout)
-    signal.alarm(DUCKDB_TIMEOUT)
-    try:
-        path = f"s3://{s3_bucket}/{table}/*.parquet"
+    def _execute():
         conn = duckdb.connect()
-        conn.execute("INSTALL httpfs; LOAD httpfs;")
-        conn.execute(f"SET s3_region='{AWS_REGION}';")
-        conn.execute("SET s3_use_credential_chain=true;")
-        conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
-        rows = conn.execute(sql).fetchdf().to_dict(orient="records")
-    finally:
-        signal.alarm(0)
+        try:
+            path = f"s3://{s3_bucket}/{table}/*.parquet"
+            conn.execute("INSTALL httpfs; LOAD httpfs;")
+            conn.execute(f"SET s3_region='{aws_region}';")
+            conn.execute("SET s3_use_credential_chain=true;")
+            conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
+            return conn.execute(sql).fetchdf().to_dict(orient="records")
+        finally:
+            conn.close()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_execute)
+        try:
+            rows = future.result(timeout=DUCKDB_TIMEOUT)
+        except FuturesTimeoutError:
+            raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
 
     before_cap = len(rows)
     return {"sql": sql, "rows": rows[:ROW_CAP], "capped": before_cap > ROW_CAP}
@@ -268,8 +271,7 @@ _SUMMARIZE_SYSTEM = """You are a business analytics summarizer for NYC yellow ca
 Given a question and query result rows, output ONLY valid JSON:
 {
   "summary": "<2-4 sentence business summary>",
-  "chart_spec": {"type": "bar|line|pie|table", "x": "<column>", "y": "<column>", "series": []},
-  "capped": <true if rows were capped, else false>
+  "chart_spec": {"type": "bar|line|pie|table", "x": "<column>", "y": "<column>", "series": []}
 }
 Rules:
 - summary must be 2-4 sentences, no bullet points
@@ -281,7 +283,12 @@ Rules:
 def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: str = OLLAMA_URL) -> dict:
     """Returns {"summary": str, "chart_spec": dict|None}."""
     rows_json = json.dumps(rows[:50], default=str)
-    cap_note = " NOTE: results were capped at 200 rows." if capped else ""
+    if capped:
+        cap_note = f" NOTE: results were capped at {ROW_CAP} rows; showing first 50 to model."
+    elif len(rows) > 50:
+        cap_note = f" NOTE: showing first 50 of {len(rows)} rows to model."
+    else:
+        cap_note = ""
     messages = [
         {"role": "system", "content": _SUMMARIZE_SYSTEM},
         {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
