@@ -461,13 +461,13 @@ aws ec2 create-volume --snapshot-id <id> --availability-zone <az> --volume-type 
 
 5 teams are provisioned by the `argocd/rbac-setup` job (PostSync hook calling the LiteLLM admin API):
 
-| Team | Allowlist | Budget / 30d |
-|---|---|---|
-| engineering | coding-assistant, fast-chat, long-context | $100 |
-| support | fast-chat | $40 |
-| product | fast-chat | $30 |
-| operations | fast-chat | $20 |
-| executives | fast-chat, long-context | $10 |
+| Team | Allowlist | Budget / 30d | TPM | RPM |
+|---|---|---|---|---|
+| engineering | coding-assistant, fast-chat, long-context, private-chat | $100 | 500,000 | 500 |
+| support | fast-chat | $40 | 150,000 | 150 |
+| product | fast-chat | $30 | 100,000 | 100 |
+| operations | fast-chat | $20 | 80,000 | 80 |
+| executives | fast-chat, long-context | $10 | 50,000 | 50 |
 
 Verify:
 ```bash
