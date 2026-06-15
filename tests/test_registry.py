@@ -1,4 +1,5 @@
-import json, pytest
+import json
+import pytest
 from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "fixtures" / "schema_registry.json"
