@@ -8,6 +8,7 @@ requirements: duckdb==1.2.2
 
 from __future__ import annotations
 
+import httpx
 import json
 import re
 
@@ -107,6 +108,8 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
         raise SQLValidationError("DDL keywords not allowed")
     if ";" in stripped:
         raise SQLValidationError("chained statements not allowed")
+    if expected_table not in known_tables:
+        raise SQLValidationError(f"Table '{expected_table}' not in registry")
     found = set(re.findall(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE))
     found |= set(re.findall(r"\bJOIN\s+(\w+)", stripped, re.IGNORECASE))
     for t in found:
@@ -142,8 +145,6 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
 </body>
 </html>"""
 
-
-import httpx
 
 OLLAMA_URL = "http://ollama.ollama.svc.cluster.local:11434/v1/chat/completions"
 OLLAMA_MODEL = "qwen2.5-coder:7b"

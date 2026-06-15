@@ -41,3 +41,8 @@ def test_validate_sql_rejects_wrong_table():
 def test_validate_sql_rejects_non_select():
     with pytest.raises(SQLValidationError, match="SELECT"):
         _validate_sql("INSERT INTO foo VALUES (1)", "kpi_monthly_summary", {"kpi_monthly_summary"})
+
+
+def test_validate_sql_rejects_unknown_expected_table():
+    with pytest.raises(SQLValidationError, match="not in registry"):
+        _validate_sql("SELECT 1 FROM bad_table", "bad_table", {"kpi_monthly_summary"})
