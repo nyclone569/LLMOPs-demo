@@ -1,0 +1,9 @@
+duckdb==1.2.2
+boto3==1.38.0
+openai==1.82.0
+streamlit==1.45.1
+altair==5.5.0
+python-dotenv==1.1.0
+pyarrow==20.0.0
+pytest==8.3.5
+pytest-mock==3.14.0
