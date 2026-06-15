@@ -13,5 +13,5 @@ metadata:
   name: open-webui
   namespace: open-webui
   annotations:
-    eks.amazonaws.com/role-arn: ANALYTICS_ROLE_ARN_PLACEHOLDER
+    eks.amazonaws.com/role-arn: arn:aws:iam::492372116094:role/llmops-cluster-analytics-open-webui
 automountServiceAccountToken: false
