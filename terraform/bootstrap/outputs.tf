@@ -58,3 +58,14 @@ output "oidc_provider_arn" {
   description = "OIDC provider ARN"
   value       = local.oidc_provider_arn
 }
+
+# Analytics IRSA outputs
+output "analytics_open_webui_role_arn" {
+  description = "ARN of IAM role for Open WebUI pod (analytics S3 access)"
+  value       = aws_iam_role.analytics_open_webui.arn
+}
+
+output "analytics_s3_bucket" {
+  description = "S3 bucket name for NYC taxi analytics Parquet data"
+  value       = aws_s3_bucket.analytics.id
+}
