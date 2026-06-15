@@ -21,9 +21,16 @@ spec:
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/nyclone569/LLMOPs.git
-      targetRevision: main
-      path: argocd/manifests
+    # NOTE: argocd/manifests source is added here after IRSA setup is complete.
+    # Steps:
+    #   1. terraform apply terraform/bootstrap
+    #   2. Fill real ARN into argocd/manifests/open-webui-sa-annotation.yaml
+    #   3. Uncomment the source block below, commit, and push
+    # - repoURL: https://github.com/nyclone569/LLMOPs.git
+    #   targetRevision: main
+    #   path: argocd/manifests
+    #   directory:
+    #     include: "open-webui-sa-annotation.yaml"
 
   destination:
     server: https://kubernetes.default.svc

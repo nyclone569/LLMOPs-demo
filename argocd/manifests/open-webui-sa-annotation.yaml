@@ -1,11 +1,12 @@
 # Annotates the Open WebUI service account with the IRSA role ARN so the pod
-# can read from the analytics S3 bucket without static credentials.
+# can read from the analytics S3 bucket via EKS pod identity (no static credentials).
 #
-# The role ARN is injected by Terraform via an ExternalSecret — see
-# argocd/external-secrets/ for the secret store configuration.
-#
-# To get the role ARN after running terraform apply:
-#   terraform -chdir=terraform/bootstrap output analytics_open_webui_role_arn
+# Deployment steps:
+#   1. terraform apply terraform/bootstrap
+#   2. terraform -chdir=terraform/bootstrap output analytics_open_webui_role_arn
+#   3. Replace ANALYTICS_ROLE_ARN_PLACEHOLDER below with the actual ARN
+#   4. Uncomment the manifests source in argocd/apps/open-webui.yaml
+#   5. Commit and push — ArgoCD will sync the annotation and restart the pod
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -13,3 +14,4 @@ metadata:
   namespace: open-webui
   annotations:
     eks.amazonaws.com/role-arn: ANALYTICS_ROLE_ARN_PLACEHOLDER
+automountServiceAccountToken: false

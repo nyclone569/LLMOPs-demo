@@ -19,6 +19,10 @@ locals {
         namespace      = "external-secrets"
         service_account = "external-secrets"
       }
+      analytics_open_webui = {
+        namespace       = "open-webui"
+        service_account = "open-webui"
+      }
     } : key => jsonencode({
       Version = "2012-10-17"
       Statement = [{
