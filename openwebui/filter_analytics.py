@@ -11,6 +11,7 @@ from __future__ import annotations
 import httpx
 import json
 import re
+import signal
 
 DOMAIN_TERMS = {
     "taxi", "trip", "trips", "fare", "borough", "zone", "pickup", "dropoff",
@@ -160,3 +161,142 @@ def _ollama_chat(messages: list[dict], model: str = OLLAMA_MODEL, ollama_url: st
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
+
+
+# Registry bundled as constant — matches schema_registry.json at repo root.
+REGISTRY: dict = {'dim_date': {'description': 'Dim Date — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'date', 'type': 'date32[day]'}, {'name': 'year', 'type': 'int64'}, {'name': 'month', 'type': 'int64'}, {'name': 'day', 'type': 'int64'}, {'name': 'day_of_week', 'type': 'int64'}, {'name': 'is_weekend', 'type': 'bool'}, {'name': 'is_holiday', 'type': 'bool'}, {'name': 'quarter', 'type': 'int64'}, {'name': 'week_of_year', 'type': 'int64'}], 'example_questions': []}, 'dim_payment_type': {'description': 'Dim Payment Type — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'payment_type_code', 'type': 'int32'}, {'name': 'description', 'type': 'string'}], 'example_questions': []}, 'dim_rate_code': {'description': 'Dim Rate Code — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'rate_code_id', 'type': 'int32'}, {'name': 'description', 'type': 'string'}], 'example_questions': []}, 'dim_vendor': {'description': 'Dim Vendor — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'vendor_id', 'type': 'int32'}, {'name': 'vendor_name', 'type': 'string'}], 'example_questions': []}, 'dim_zone': {'description': 'Dim Zone — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'borough', 'type': 'string'}, {'name': 'zone', 'type': 'string'}, {'name': 'service_zone', 'type': 'string'}], 'example_questions': []}, 'dim_zone_grouped': {'description': 'Dim Zone Grouped — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'service_zone', 'type': 'string'}, {'name': 'pickup_trip_count', 'type': 'int64'}, {'name': 'trip_volume_tier', 'type': 'string'}, {'name': 'group_name', 'type': 'string'}], 'example_questions': []}, 'dq_batch_metadata': {'description': 'Dq Batch Metadata — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'script_name', 'type': 'string'}, {'name': 'export_timestamp', 'type': 'timestamp[ns]'}, {'name': 'export_date', 'type': 'date32[day]'}, {'name': 'fact_trips_row_count', 'type': 'int64'}, {'name': 'dataset_count', 'type': 'int32'}], 'example_questions': []}, 'dq_row_count_trend': {'description': 'Dq Row Count Trend — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'delta_from_7day_avg', 'type': 'double'}, {'name': 'anomaly_flag', 'type': 'string'}], 'example_questions': []}, 'dq_validation_summary': {'description': 'Dq Validation Summary — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'total_trips', 'type': 'int64'}, {'name': 'zero_distance', 'type': 'int64'}, {'name': 'negative_fare', 'type': 'int64'}, {'name': 'invalid_passengers', 'type': 'int64'}, {'name': 'negative_tip', 'type': 'int64'}, {'name': 'total_less_than_fare', 'type': 'int64'}], 'example_questions': []}, 'fact_trips_borough': {'description': 'Fact Trips Borough — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}], 'example_questions': []}, 'fact_trips_daily': {'description': 'Fact Trips Daily — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'total_passengers', 'type': 'int64'}], 'example_questions': []}, 'fact_trips_hourly': {'description': 'Hourly trip counts and fares aggregated across all zones', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': ['which hour has the most trips', 'peak hour revenue']}, 'fact_trips_hourly_zone': {'description': 'Fact Trips Hourly Zone — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'dropoff_count', 'type': 'int64'}], 'example_questions': []}, 'kpi_borough_comparison': {'description': 'Revenue and trip counts broken down by NYC borough', 'tier': 'kpi', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'market_share_pct', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': ['revenue by borough', 'which borough has most trips']}, 'kpi_daily_overview': {'description': 'Daily revenue, trips, and AOV for recent days', 'tier': 'kpi', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'unique_vendors', 'type': 'int64'}, {'name': 'utilization_rate', 'type': 'decimal128(23, 1)'}], 'example_questions': ['daily overview', 'recent days summary']}, 'kpi_monthly_summary': {'description': 'Monthly aggregated revenue, trips, and AOV across all zones', 'tier': 'kpi', 'columns': [{'name': 'pickup_year', 'type': 'int32'}, {'name': 'pickup_month', 'type': 'int32'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_trip_per_day', 'type': 'decimal128(22, 1)'}, {'name': 'prev_month_revenue', 'type': 'double'}, {'name': 'mom_growth_pct', 'type': 'double'}], 'example_questions': ['show monthly revenue trend', 'which month had the most trips']}, 'kpi_payment_trends': {'description': 'Payment type breakdown (cash, card, etc.) by period', 'tier': 'kpi', 'columns': [{'name': 'payment_type', 'type': 'int32'}, {'name': 'payment_desc', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}], 'example_questions': ['payment type breakdown', 'how do passengers pay']}, 'kpi_vendor_performance': {'description': 'Trip count and revenue by taxi vendor', 'tier': 'kpi', 'columns': [{'name': 'vendor_id', 'type': 'int32'}, {'name': 'vendor_name', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'market_share_pct', 'type': 'decimal128(24, 1)'}], 'example_questions': ['vendor performance', 'which vendor has most trips']}, 'kpi_weekly_trends': {'description': 'Weekly revenue, trip count, and AOV trends', 'tier': 'kpi', 'columns': [{'name': 'year', 'type': 'int64'}, {'name': 'week', 'type': 'int64'}, {'name': 'week_start', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'prev_week_trips', 'type': 'int64'}, {'name': 'trip_growth_pct', 'type': 'decimal128(23, 1)'}, {'name': 'revenue_growth_pct', 'type': 'double'}], 'example_questions': ['show weekly trip count', 'weekly revenue trend']}, 'kpi_zone_net_flow': {'description': 'Kpi Zone Net Flow — auto-generated, update manually', 'tier': 'kpi', 'columns': [{'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'pickups', 'type': 'int64'}, {'name': 'dropoffs', 'type': 'int64'}, {'name': 'net_flow', 'type': 'int64'}, {'name': 'net_flow_ratio', 'type': 'decimal128(22, 1)'}, {'name': 'imbalance_score', 'type': 'decimal128(22, 1)'}, {'name': 'primary_inflow_source', 'type': 'string'}, {'name': 'primary_outflow_dest', 'type': 'string'}, {'name': 'pickup_revenue', 'type': 'double'}, {'name': 'dropoff_revenue', 'type': 'double'}], 'example_questions': []}, 'kpi_zone_performance': {'description': 'Revenue, trips, and AOV per zone', 'tier': 'kpi', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'pickups', 'type': 'int64'}, {'name': 'dropoffs', 'type': 'int64'}, {'name': 'net_flow', 'type': 'int64'}, {'name': 'net_flow_ratio', 'type': 'decimal128(22, 1)'}, {'name': 'pickup_revenue', 'type': 'double'}, {'name': 'dropoff_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'airport_trip_count', 'type': 'int64'}, {'name': 'airport_trip_pct', 'type': 'decimal128(24, 1)'}], 'example_questions': ['zone performance by revenue', 'top zones by fare']}, 'od_borough_matrix': {'description': 'Od Borough Matrix — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'pct_of_total', 'type': 'decimal128(24, 1)'}], 'example_questions': []}, 'ops_passenger_count_pattern': {'description': 'Ops Passenger Count Pattern — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'passenger_count', 'type': 'int32'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}], 'example_questions': []}, 'ops_peak_hours_heatmap': {'description': 'Trip count by hour-of-day and day-of-week for heatmap display', 'tier': 'ops', 'columns': [{'name': 'pickup_hour', 'type': 'int64'}, {'name': 'day_of_week', 'type': 'int64'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}], 'example_questions': ['show peak hour heatmap', 'busy hours by day']}, 'ops_trip_distance_distribution': {'description': 'Ops Trip Distance Distribution — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'distance_bucket', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_total', 'type': 'double'}], 'example_questions': []}, 'ops_utilization_rate': {'description': 'Ops Utilization Rate — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'total_trips', 'type': 'int64'}, {'name': 'tipped_trips', 'type': 'int64'}, {'name': 'tip_rate_pct', 'type': 'decimal128(24, 1)'}, {'name': 'multi_passenger_trips', 'type': 'int64'}, {'name': 'multi_passenger_pct', 'type': 'decimal128(24, 1)'}, {'name': 'avg_passengers', 'type': 'double'}], 'example_questions': []}, 'route_airport_analysis': {'description': 'Route Airport Analysis — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'direction', 'type': 'string'}, {'name': 'airport', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}], 'example_questions': []}, 'route_airport_zone_matrix': {'description': 'Route Airport Zone Matrix — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'airport_zone', 'type': 'string'}, {'name': 'residential_zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'peak_hour', 'type': 'int32'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': []}, 'route_cross_borough': {'description': 'Route Cross Borough — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': []}, 'route_popular_routes': {'description': 'Most frequent pickup-to-dropoff zone pairs by trip count', 'tier': 'route', 'columns': [{'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_zone', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_revenue', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': ['most popular routes', 'top pickup to dropoff zones']}, 'route_top_dropoff_zones': {'description': 'Route Top Dropoff Zones — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'dropoff_zone', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': []}, 'route_top_pickup_zones': {'description': 'Route Top Pickup Zones — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': []}}
+
+
+_SUPERVISOR_SYSTEM = """You are a table selection agent for NYC yellow cab trip analytics.
+
+Dataset tiers:
+- kpi: pre-aggregated monthly/weekly/daily metrics — prefer these for summary questions
+- fact: daily/hourly grain with zone and vendor IDs — use for detailed filtering
+- dim: lookup tables (zone names, boroughs, vendors)
+- route: pickup-to-dropoff zone pair aggregates
+- ops: operational patterns (peak hours, passenger counts, distances)
+- dq: data quality checks — only if asked about data quality
+
+Borough names: Manhattan, Brooklyn, Queens, Bronx, Staten Island.
+Revenue = total_fare_amount (excludes tips). Peak hours = 7-9am and 5-8pm.
+
+Select ONE table. Output ONLY valid JSON, no explanation:
+{"table": "<table_name>", "confidence": "high|low", "reasoning": "<one sentence>"}"""
+
+
+def _registry_as_prompt(registry: dict) -> str:
+    lines = []
+    for table, entry in registry.items():
+        col_list = ", ".join(f"{c['name']}({c['type']})" for c in entry["columns"])
+        examples = "; ".join(entry.get("example_questions", []))
+        lines.append(
+            f"- {table} [{entry['tier']}]: {entry['description']} | columns: {col_list} | examples: {examples}"
+        )
+    return "\n".join(lines)
+
+
+def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL) -> dict:
+    """Returns {"table": str, "confidence": "high|low", "reasoning": str}."""
+    registry_text = _registry_as_prompt(registry)
+    messages = [
+        {"role": "system", "content": _SUPERVISOR_SYSTEM},
+        {"role": "user", "content": f"Available tables:\n{registry_text}\n\nQuestion: {question}"},
+    ]
+    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    cleaned = _strip_fences(raw)
+    parsed = json.loads(cleaned.strip())
+    table = parsed.get("table", "")
+    if table not in registry:
+        raise ValueError(f"Supervisor selected unknown table: {table}")
+    confidence = parsed.get("confidence", "low")
+    if confidence not in ("high", "low"):
+        confidence = "low"
+    return {"table": table, "confidence": confidence, "reasoning": parsed.get("reasoning", "")}
+
+
+S3_BUCKET = "YOUR_BUCKET_NAME"  # overridden by Valves at runtime
+AWS_REGION = "ap-southeast-1"
+ROW_CAP = 200
+DUCKDB_TIMEOUT = 30
+
+_QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics stored in Parquet files on S3.
+Rules:
+- Write ONE SELECT statement only
+- No markdown, no explanation, just the SQL
+- Use only the table and columns provided
+- Revenue = total_fare_amount (excludes tips)
+- Borough values: Manhattan, Brooklyn, Queens, Bronx, Staten Island
+- Peak hours: 7-9 and 17-20 (24h)
+- Do not use read_parquet(), httpfs, or any file functions"""
+
+
+def _run_query(question: str, table: str, registry: dict, s3_bucket: str, ollama_url: str = OLLAMA_URL) -> dict:
+    """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
+    schema = registry[table]
+    col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
+    messages = [
+        {"role": "system", "content": _QUERY_SYSTEM},
+        {"role": "user", "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}"},
+    ]
+    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    sql = _strip_fences(raw)
+    _validate_sql(sql, table, set(registry.keys()))
+
+    import duckdb
+
+    def _timeout(signum, frame):
+        raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
+
+    signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(DUCKDB_TIMEOUT)
+    try:
+        path = f"s3://{s3_bucket}/{table}/*.parquet"
+        conn = duckdb.connect()
+        conn.execute("INSTALL httpfs; LOAD httpfs;")
+        conn.execute(f"SET s3_region='{AWS_REGION}';")
+        conn.execute("SET s3_use_credential_chain=true;")
+        conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
+        rows = conn.execute(sql).fetchdf().to_dict(orient="records")
+    finally:
+        signal.alarm(0)
+
+    before_cap = len(rows)
+    return {"sql": sql, "rows": rows[:ROW_CAP], "capped": before_cap > ROW_CAP}
+
+
+_SUMMARIZE_SYSTEM = """You are a business analytics summarizer for NYC yellow cab trip data.
+Given a question and query result rows, output ONLY valid JSON:
+{
+  "summary": "<2-4 sentence business summary>",
+  "chart_spec": {"type": "bar|line|pie|table", "x": "<column>", "y": "<column>", "series": []},
+  "capped": <true if rows were capped, else false>
+}
+Rules:
+- summary must be 2-4 sentences, no bullet points
+- chart x and y must be column names from the provided rows
+- Revenue means total_fare_amount (excludes tips)
+- No markdown, no explanation outside the JSON"""
+
+
+def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: str = OLLAMA_URL) -> dict:
+    """Returns {"summary": str, "chart_spec": dict|None}."""
+    rows_json = json.dumps(rows[:50], default=str)
+    cap_note = " NOTE: results were capped at 200 rows." if capped else ""
+    messages = [
+        {"role": "system", "content": _SUMMARIZE_SYSTEM},
+        {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
+    ]
+    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    parsed = json.loads(raw.strip())
+    summary = parsed.get("summary", "").strip()
+    chart_spec = parsed.get("chart_spec")
+
+    # Validate chart_spec columns against actual row keys
+    if chart_spec and rows:
+        col_names = set(rows[0].keys())
+        if (chart_spec.get("x") not in col_names or
+                chart_spec.get("y") not in col_names or
+                chart_spec.get("type") not in {"bar", "line", "pie", "table"}):
+            chart_spec = None
+
+    return {"summary": summary, "chart_spec": chart_spec}
