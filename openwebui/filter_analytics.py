@@ -79,6 +79,41 @@ def chart_spec_to_vegalite(chart_spec: dict, rows: list[dict]) -> dict:
     }
 
 
+_DDL_KEYWORDS = re.compile(
+    r"\b(DROP|CREATE|INSERT|UPDATE|DELETE|ALTER|TRUNCATE)\b", re.IGNORECASE
+)
+_FILE_FUNCTIONS = re.compile(
+    r"\b(read_parquet|read_csv_auto|read_json|COPY|EXPORT|httpfs)\b", re.IGNORECASE
+)
+
+
+class SQLValidationError(Exception):
+    pass
+
+
+def _strip_fences(text: str) -> str:
+    text = text.strip()
+    match = re.match(r"^```(?:sql)?\s*\n?(.*?)\n?```$", text, re.DOTALL)
+    return match.group(1).strip() if match else text
+
+
+def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
+    stripped = sql.strip()
+    if _FILE_FUNCTIONS.search(stripped):
+        raise SQLValidationError("file function not allowed (read_parquet, httpfs, COPY, etc.)")
+    if not stripped.upper().startswith("SELECT"):
+        raise SQLValidationError("SQL must start with SELECT")
+    if _DDL_KEYWORDS.search(stripped):
+        raise SQLValidationError("DDL keywords not allowed")
+    if ";" in stripped:
+        raise SQLValidationError("chained statements not allowed")
+    found = set(re.findall(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE))
+    found |= set(re.findall(r"\bJOIN\s+(\w+)", stripped, re.IGNORECASE))
+    for t in found:
+        if t.lower() != expected_table.lower():
+            raise SQLValidationError(f"Table '{t}' not allowed — expected '{expected_table}'")
+
+
 def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
     """Wrap a Vega-Lite spec in a self-contained HTML artifact string.
 
@@ -106,3 +141,21 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
   </script>
 </body>
 </html>"""
+
+
+import httpx
+
+OLLAMA_URL = "http://ollama.ollama.svc.cluster.local:11434/v1/chat/completions"
+OLLAMA_MODEL = "qwen2.5-coder:7b"
+OLLAMA_TIMEOUT = 60
+
+
+def _ollama_chat(messages: list[dict], model: str = OLLAMA_MODEL, ollama_url: str = OLLAMA_URL) -> str:
+    """Direct HTTP call to Ollama OpenAI-compatible endpoint."""
+    resp = httpx.post(
+        ollama_url,
+        json={"model": model, "messages": messages},
+        timeout=OLLAMA_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
