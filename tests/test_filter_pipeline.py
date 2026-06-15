@@ -46,3 +46,11 @@ def test_validate_sql_rejects_non_select():
 def test_validate_sql_rejects_unknown_expected_table():
     with pytest.raises(SQLValidationError, match="not in registry"):
         _validate_sql("SELECT 1 FROM bad_table", "bad_table", {"kpi_monthly_summary"})
+
+
+def test_validate_sql_allows_cte():
+    _validate_sql(
+        "WITH cte AS (SELECT trip_count FROM kpi_monthly_summary) SELECT * FROM cte",
+        "kpi_monthly_summary",
+        {"kpi_monthly_summary"},
+    )

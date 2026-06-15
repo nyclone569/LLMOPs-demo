@@ -69,7 +69,11 @@ def chart_spec_to_vegalite(chart_spec: dict, rows: list[dict]) -> dict:
     if chart_type == "pie":
         x_orient = {"sort": "-y"}
 
-    x_type = "temporal" if chart_type == "line" else "ordinal"
+    if chart_type == "line":
+        sample_val = str(rows[0].get(x_field, "")) if rows else ""
+        x_type = "temporal" if re.match(r"\d{4}-\d{2}", sample_val) else "quantitative"
+    else:
+        x_type = "ordinal"
 
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -106,8 +110,9 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
     stripped = sql.strip()
     if _FILE_FUNCTIONS.search(stripped):
         raise SQLValidationError("file function not allowed (read_parquet, httpfs, COPY, etc.)")
-    if not stripped.upper().startswith("SELECT"):
-        raise SQLValidationError("SQL must start with SELECT")
+    leading = stripped.upper().lstrip()
+    if not (leading.startswith("SELECT") or leading.startswith("WITH")):
+        raise SQLValidationError("SQL must start with SELECT or WITH")
     if _DDL_KEYWORDS.search(stripped):
         raise SQLValidationError("DDL keywords not allowed")
     if ";" in stripped:
@@ -116,8 +121,10 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
         raise SQLValidationError(f"Table '{expected_table}' not in registry")
     found = set(re.findall(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE))
     found |= set(re.findall(r"\bJOIN\s+(\w+)", stripped, re.IGNORECASE))
+    # CTE names are valid references — exclude them from the foreign-table check
+    cte_names = {m.lower() for m in re.findall(r"\bWITH\s+(\w+)\s+AS\s*\(", stripped, re.IGNORECASE)}
     for t in found:
-        if t.lower() != expected_table.lower():
+        if t.lower() != expected_table.lower() and t.lower() not in cte_names:
             raise SQLValidationError(f"Table '{t}' not allowed — expected '{expected_table}'")
 
 
@@ -236,6 +243,8 @@ Rules:
 def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL) -> dict:
     """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
+    if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
+        raise ValueError(f"Invalid aws_region format: {aws_region!r}")
     col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
     messages = [
         {"role": "system", "content": _QUERY_SYSTEM},
@@ -297,7 +306,7 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
         {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
     ]
     raw = _ollama_chat(messages, ollama_url=ollama_url)
-    parsed = json.loads(raw.strip())
+    parsed = json.loads(_strip_fences(raw).strip())
     summary = parsed.get("summary", "").strip()
     chart_spec = parsed.get("chart_spec")
 
@@ -345,11 +354,16 @@ class Filter:
             return body
 
         if intent == INTENT_AMBIGUOUS:
-            user_messages[-1]["content"] = (
+            clarification = (
                 "That sounds data-related — do you want me to run an analytics "
                 "query on the NYC taxi dataset? If so, please describe what you'd "
                 "like to know (e.g. 'show monthly revenue trend' or 'top boroughs by trips')."
             )
+            body["messages"] = messages[:-1] + [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": clarification},
+            ]
+            body["stream"] = False
             return body
 
         # INTENT_ANALYTICS — run pipeline
