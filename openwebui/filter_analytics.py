@@ -307,3 +307,102 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
             chart_spec = None
 
     return {"summary": summary, "chart_spec": chart_spec}
+
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class Valves:
+    """Open WebUI admin-configurable settings for this filter."""
+    s3_bucket: str = field(default=S3_BUCKET)
+    aws_region: str = field(default=AWS_REGION)
+    ollama_url: str = field(default=OLLAMA_URL)
+    enabled: bool = field(default=True)
+
+
+class Filter:
+    def __init__(self):
+        self.valves = Valves()
+
+    def inlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
+        """Intercept every message before it reaches the LLM."""
+        if not self.valves.enabled:
+            return body
+
+        messages = body.get("messages", [])
+        user_messages = [m for m in messages if m.get("role") == "user"]
+        if not user_messages:
+            return body
+
+        question = user_messages[-1].get("content", "").strip()
+        if not question:
+            return body
+
+        intent = classify_intent(question)
+
+        if intent == INTENT_CHAT:
+            return body
+
+        if intent == INTENT_AMBIGUOUS:
+            body["messages"][-1]["content"] = (
+                "That sounds data-related — do you want me to run an analytics "
+                "query on the NYC taxi dataset? If so, please describe what you'd "
+                "like to know (e.g. 'show monthly revenue trend' or 'top boroughs by trips')."
+            )
+            return body
+
+        # INTENT_ANALYTICS — run pipeline
+        try:
+            response_text = _run_analytics(
+                question,
+                self.valves.s3_bucket,
+                self.valves.aws_region,
+                self.valves.ollama_url,
+            )
+        except Exception as e:
+            response_text = f"Analytics pipeline error: {e}"
+
+        # Inject response as assistant message, signal Open WebUI to return it directly
+        body["messages"] = messages[:-1] + [
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": response_text},
+        ]
+        body["stream"] = False
+        return body
+
+    def outlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
+        return body
+
+
+def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL) -> str:
+    """Run full supervisor → query → summarize pipeline, return formatted response."""
+    supervisor = _run_supervisor(question, REGISTRY, ollama_url)
+
+    if supervisor["confidence"] == "low":
+        return (
+            "I wasn't confident which data to use for that question. "
+            f"Could you be more specific? ({supervisor['reasoning']})"
+        )
+
+    table = supervisor["table"]
+
+    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, ollama_url)
+    rows = query_result["rows"]
+    capped = query_result["capped"]
+
+    if not rows:
+        return "No data found for that query."
+
+    summarize_result = _run_summarize(question, rows, capped, ollama_url)
+    summary = summarize_result["summary"]
+    chart_spec = summarize_result["chart_spec"]
+
+    parts = [summary]
+    if chart_spec:
+        html = build_html_artifact(chart_spec, rows)
+        if html:
+            parts.append(html)
+
+    return "\n\n".join(parts)
