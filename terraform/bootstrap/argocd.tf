@@ -10,6 +10,25 @@ locals {
   argocd_admin_password = var.argocd_admin_password != "" ? var.argocd_admin_password : random_password.argocd_admin[0].result
 }
 
+# Wait for the EKS API server to stabilise after LBC and cert-manager install
+# their CRDs. Without this pause, ArgoCD's large CRD batch arrives while the
+# API server is still under load, causing "connection reset by peer".
+resource "null_resource" "api_server_settle" {
+  triggers = {
+    lbc_version  = helm_release.aws_load_balancer_controller.version
+    cm_version   = helm_release.cert_manager.version
+  }
+
+  provisioner "local-exec" {
+    command = "sleep 30"
+  }
+
+  depends_on = [
+    helm_release.aws_load_balancer_controller,
+    helm_release.cert_manager,
+  ]
+}
+
 # Helm release for ArgoCD
 resource "helm_release" "argocd" {
   name       = "argocd"
@@ -17,6 +36,8 @@ resource "helm_release" "argocd" {
   chart      = "argo-cd"
   version    = var.argocd_version
   namespace  = kubernetes_namespace.argocd.metadata[0].name
+  wait       = true
+  timeout    = 600
 
   # Disable default admin password generation
   set {
@@ -117,7 +138,7 @@ resource "helm_release" "argocd" {
 
   depends_on = [
     kubernetes_namespace.argocd,
-    helm_release.aws_load_balancer_controller,
     null_resource.helm_repo_update,
+    null_resource.api_server_settle,
   ]
 }
