@@ -8,10 +8,13 @@ requirements: duckdb==1.2.2
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from dataclasses import dataclass, field
+from typing import Optional
 import httpx
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import traceback
 
 DOMAIN_TERMS = {
     "taxi", "trip", "trips", "fare", "borough", "zone", "pickup", "dropoff",
@@ -309,10 +312,6 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
     return {"summary": summary, "chart_spec": chart_spec}
 
 
-from dataclasses import dataclass, field
-from typing import Optional
-
-
 @dataclass
 class Valves:
     """Open WebUI admin-configurable settings for this filter."""
@@ -346,7 +345,7 @@ class Filter:
             return body
 
         if intent == INTENT_AMBIGUOUS:
-            body["messages"][-1]["content"] = (
+            user_messages[-1]["content"] = (
                 "That sounds data-related — do you want me to run an analytics "
                 "query on the NYC taxi dataset? If so, please describe what you'd "
                 "like to know (e.g. 'show monthly revenue trend' or 'top boroughs by trips')."
@@ -362,6 +361,7 @@ class Filter:
                 self.valves.ollama_url,
             )
         except Exception as e:
+            traceback.print_exc()
             response_text = f"Analytics pipeline error: {e}"
 
         # Inject response as assistant message, signal Open WebUI to return it directly
@@ -369,6 +369,8 @@ class Filter:
             {"role": "user", "content": question},
             {"role": "assistant", "content": response_text},
         ]
+        # The injected assistant turn short-circuits LLM forwarding.
+        # stream=False prevents Open WebUI from attempting a streaming response.
         body["stream"] = False
         return body
 
