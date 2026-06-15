@@ -36,7 +36,7 @@ The primary goal is a learning and portfolio project that demonstrates:
 - Write-back or mutation operations
 - Authentication on the query interface
 - S3 throttling retry / partial read detection
-- Context window guard for large schema registries
+- Dynamic context window management (registry is kept under 3000 tokens by design — see §5.3)
 - Dashboard persistence
 
 ---
@@ -111,15 +111,21 @@ Built once locally before S3 upload by scanning all Parquet file metadata.
 - Description and example questions written manually (one-time effort)
 - Output saved as `schema_registry.json`, committed to repo, uploaded to S3 alongside data
 
-### 5.3 Startup Health Check
+### 5.3 Context Budget
+
+`qwen2.5-coder:7b` default context window in Ollama: 2048 tokens. Ollama must be started with `--ctx-size 8192` (fits comfortably in T4 16GB VRAM with 7B quantized model).
+
+Registry token estimate: 32 tables × ~40 tokens per entry (name + description + columns + examples) ≈ 1280 tokens. Plus system prompt (~400 tokens) and user question (~50 tokens) = ~1730 tokens total supervisor input, well within 8192.
+
+If the registry grows beyond 32 tables in a future version, trim `example_questions` first (saves ~15 tokens/table).
+
+### 5.4 Startup Health Check
 
 On service start, validate that:
 - `schema_registry.json` loads and parses without error
 - Every table name in the registry has a corresponding S3 path
 
-Fail fast at startup rather than discovering missing tables at query time.
-
----
+On service start, validate that:
 
 ## 6. Agent Design
 
@@ -144,9 +150,11 @@ Fail fast at startup rather than discovering missing tables at query time.
 ```
 
 **Validation before proceeding:**
-- `confidence` must be `"high"` or `"low"` — any other value treated as `"low"`
+- `confidence` must be `"high"` or `"low"` — any other value is logged as `unexpected_confidence_value` and treated as `"low"`
 - `table` must exist in schema registry
 - If `confidence` is `"low"` → return clarification question to user, stop pipeline
+
+The system prompt must instruct the model explicitly: *"You must output exactly one of: high, low. No other values."* Unexpected values logged separately so repeated occurrences surface as a quality regression, not silent noise.
 
 **Multi-table detection:**
 - If question uses language implying a JOIN (e.g., "compare vendors by zone") and no single table covers it → treat as low confidence, explain v1 limitation
@@ -213,6 +221,17 @@ Table name comes from the supervisor output, not user input.
 - `chart_spec.type` must be one of: `bar`, `line`, `pie`, `table`
 - `chart_spec.x` and `chart_spec.y` must reference column names present in the returned rows
 - If validation fails → return summary only, no chart, log the failure
+
+**Chart rendering in Streamlit:**
+
+Streamlit uses `st.altair_chart` (via Altair/Vega-Lite) to render charts from the chart spec:
+- `bar` → `mark_bar()`, x = `chart_spec.x`, y = `chart_spec.y`
+- `line` → `mark_line()`, x = `chart_spec.x`, y = `chart_spec.y`
+- `pie` → rendered as horizontal bar (Altair has no native pie; this is acceptable for v1)
+- `table` → `st.dataframe(rows_df)` — ignores x/y, renders full row set as a table
+- `series` field: if non-empty, used as the color encoding dimension for multi-series charts
+
+If chart rendering raises an exception, catch it, log it, and display summary text only — never show a broken chart to the user.
 
 ---
 
@@ -322,7 +341,7 @@ Raw LLM response is always logged before parsing so failures are reproducible.
 | Component | Choice | Notes |
 |-----------|--------|-------|
 | EC2 instance | `g4dn.xlarge` | T4 GPU, 16GB VRAM |
-| Local LLM | `qwen2.5-coder:7b` via Ollama | OpenAI-compatible API on port 11434 |
+| Local LLM | `qwen2.5-coder:7b` via Ollama | OpenAI-compatible API on port 11434, started with `--ctx-size 8192` |
 | Query engine | DuckDB + httpfs | Queries Parquet on S3 directly |
 | Data storage | S3 bucket (private) | One directory per table, `*.parquet` glob |
 | Demo UI | Streamlit | Renders summary + chart from chart spec |
@@ -330,8 +349,10 @@ Raw LLM response is always logged before parsing so failures are reproducible.
 
 ### 10.1 S3 Layout
 
+Bucket name is configured via environment variable `ANALYTICS_S3_BUCKET` (e.g., `nyc-taxi-analytics-<team>-dev`). Never hardcoded. DuckDB paths are constructed as `s3://{ANALYTICS_S3_BUCKET}/{table}/*.parquet`.
+
 ```
-s3://bucket-name/
+s3://{ANALYTICS_S3_BUCKET}/
   schema_registry.json
   fact_trips_daily/
     *.parquet
@@ -399,7 +420,26 @@ s3://bucket-name/
 | 1 | Upload Parquet to S3, build schema registry script, test DuckDB httpfs against S3 |
 | 2 | Supervisor agent + SQL validator + Query agent, unit tests |
 | 3 | Summarize agent, full pipeline wiring, structured logging with correlation ID |
-| 4 | Streamlit UI, security tests, golden question eval, cleanup |
+| 4 | Streamlit UI + chart rendering, golden question eval, cleanup. Security tests deferred to Day 3 end if time allows. |
+
+### 13.1 Golden Question Set (10 questions)
+
+These questions must pass end-to-end before Day 4 is complete. One per major table tier:
+
+| # | Question | Expected table |
+|---|----------|---------------|
+| 1 | Show monthly revenue trend | `kpi_monthly_summary` |
+| 2 | Which hour has the most trips? | `fact_trips_hourly` |
+| 3 | Show weekly trip count | `kpi_weekly_trends` |
+| 4 | Revenue by borough this year | `kpi_borough_comparison` |
+| 5 | What are the most popular routes? | `route_popular_routes` |
+| 6 | Show zone performance by revenue | `kpi_zone_performance` |
+| 7 | Show peak hour heatmap | `ops_peak_hours_heatmap` |
+| 8 | Payment type breakdown | `kpi_payment_trends` |
+| 9 | Daily overview for recent days | `kpi_daily_overview` |
+| 10 | Show vendor performance | `kpi_vendor_performance` |
+
+Acceptance threshold: 8/10 questions reach summarize agent with valid SQL and non-empty summary.
 
 ---
 
