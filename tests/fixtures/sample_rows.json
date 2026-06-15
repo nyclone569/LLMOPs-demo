@@ -1,0 +1,5 @@
+[
+  {"month": "2026-01-01", "revenue": 1234567.89, "trip_count": 98432, "avg_fare": 12.54},
+  {"month": "2026-02-01", "revenue": 1189432.10, "trip_count": 94201, "avg_fare": 12.63},
+  {"month": "2026-03-01", "revenue": 1312000.00, "trip_count": 102100, "avg_fare": 12.85}
+]
