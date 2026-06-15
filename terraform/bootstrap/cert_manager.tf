@@ -52,7 +52,10 @@ resource "helm_release" "cert_manager" {
     value = "128Mi"
   }
 
-  depends_on = [kubernetes_namespace.cert_manager]
+  depends_on = [
+    kubernetes_namespace.cert_manager,
+    null_resource.helm_repo_update,
+  ]
 }
 
 # Use null_resource + kubectl to avoid CRD pre-validation at plan time

@@ -307,6 +307,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.aws_load_balancer_controller
+    aws_iam_role_policy_attachment.aws_load_balancer_controller,
+    null_resource.helm_repo_update,
   ]
 }

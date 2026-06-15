@@ -117,6 +117,7 @@ resource "helm_release" "argocd" {
 
   depends_on = [
     kubernetes_namespace.argocd,
-    helm_release.aws_load_balancer_controller
+    helm_release.aws_load_balancer_controller,
+    null_resource.helm_repo_update,
   ]
 }

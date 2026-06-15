@@ -70,4 +70,6 @@ resource "helm_release" "metrics_server" {
     name  = "tolerations[0].operator"
     value = "Exists"
   }
+
+  depends_on = [null_resource.helm_repo_update]
 }

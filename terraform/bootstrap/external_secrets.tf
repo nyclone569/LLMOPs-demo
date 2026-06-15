@@ -78,7 +78,8 @@ resource "helm_release" "external_secrets" {
   depends_on = [
     kubernetes_namespace.external_secrets,
     aws_iam_role_policy_attachment.external_secrets,
-    helm_release.aws_load_balancer_controller
+    helm_release.aws_load_balancer_controller,
+    null_resource.helm_repo_update,
   ]
 }
 
