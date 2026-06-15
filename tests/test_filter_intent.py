@@ -1,4 +1,3 @@
-import pytest
 import sys
 from pathlib import Path
 
@@ -48,3 +47,11 @@ def test_routes_analytics_on_peak_hours():
 
 def test_routes_analytics_case_insensitive():
     assert classify_intent("SHOW MONTHLY REVENUE FOR TAXI") == INTENT_ANALYTICS
+
+
+def test_no_false_positive_farewell():
+    assert classify_intent("show farewell message to the team") == INTENT_CHAT
+
+
+def test_no_false_positive_per_in_performance():
+    assert classify_intent("check system performance metrics") == INTENT_CHAT
