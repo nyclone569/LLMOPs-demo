@@ -158,31 +158,36 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
 </html>"""
 
 
-OLLAMA_URL = "http://ollama.ollama.svc.cluster.local:11434/v1/chat/completions"
-OLLAMA_MODEL = "qwen2.5-coder:7b"
-OLLAMA_TIMEOUT = 60
+LITELLM_URL = "http://litellm.litellm.svc.cluster.local:4000/v1/chat/completions"
+LITELLM_MODEL = "private-chat"
+LITELLM_TIMEOUT = 60
 
 
-def _ollama_chat(messages: list[dict], model: str = OLLAMA_MODEL, ollama_url: str = OLLAMA_URL) -> str:
-    """Direct HTTP call to Ollama OpenAI-compatible endpoint."""
+def _llm_chat(messages: list[dict], model: str = LITELLM_MODEL, litellm_url: str = LITELLM_URL, api_key: str = "") -> str:
+    """HTTP call to LiteLLM OpenAI-compatible endpoint."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     resp = httpx.post(
-        ollama_url,
+        litellm_url,
         json={"model": model, "messages": messages},
-        timeout=OLLAMA_TIMEOUT,
+        headers=headers,
+        timeout=LITELLM_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
-async def _stream_ollama(messages: list[dict], ollama_url: str = OLLAMA_URL, model: str = OLLAMA_MODEL) -> StreamingResponse:
-    """Stream Ollama response as SSE bytes. Returns StreamingResponse for Open WebUI to proxy directly."""
+async def _stream_llm(messages: list[dict], litellm_url: str = LITELLM_URL, model: str = LITELLM_MODEL, api_key: str = "") -> StreamingResponse:
+    """Stream LiteLLM response as SSE bytes."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
     async def generator():
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
-                ollama_url,
+                litellm_url,
                 json={"model": model, "messages": messages, "stream": True},
-                timeout=OLLAMA_TIMEOUT,
+                headers=headers,
+                timeout=LITELLM_TIMEOUT,
             ) as r:
                 async for chunk in r.aiter_bytes():
                     yield chunk
@@ -222,14 +227,14 @@ def _registry_as_prompt(registry: dict) -> str:
     return "\n".join(lines)
 
 
-def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
+def _run_supervisor(question: str, registry: dict, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
     """Returns {"table": str, "confidence": "high|low", "reasoning": str}."""
     registry_text = _registry_as_prompt(registry)
     messages = [
         {"role": "system", "content": _SUPERVISOR_SYSTEM},
         {"role": "user", "content": f"Available tables:\n{registry_text}\n\nQuestion: {question}"},
     ]
-    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
+    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
     cleaned = _strip_fences(raw)
     parsed = json.loads(cleaned.strip())
     table = parsed.get("table", "")
@@ -257,7 +262,7 @@ Rules:
 - Do not use read_parquet(), httpfs, or any file functions"""
 
 
-def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
+def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
     """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
@@ -267,7 +272,7 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         {"role": "system", "content": _QUERY_SYSTEM},
         {"role": "user", "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}"},
     ]
-    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
+    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
     sql = _strip_fences(raw)
     _validate_sql(sql, table, set(registry.keys()))
 
@@ -330,7 +335,7 @@ Rules:
 - No markdown, no explanation outside the JSON"""
 
 
-def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
+def _run_summarize(question: str, rows: list[dict], capped: bool, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
     """Returns {"summary": str, "chart_spec": dict|None}."""
     rows_json = json.dumps(rows[:50], default=str)
     if capped:
@@ -343,7 +348,7 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
         {"role": "system", "content": _SUMMARIZE_SYSTEM},
         {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
     ]
-    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
+    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
     parsed = json.loads(_strip_fences(raw).strip())
     summary = parsed.get("summary", "").strip()
     chart_spec = parsed.get("chart_spec")
@@ -364,21 +369,23 @@ class Pipe:
         """Open WebUI admin-configurable settings for this pipe."""
         s3_bucket: str = S3_BUCKET
         aws_region: str = AWS_REGION
-        ollama_url: str = OLLAMA_URL
-        ollama_model: str = OLLAMA_MODEL
+        litellm_url: str = LITELLM_URL
+        litellm_model: str = LITELLM_MODEL
+        litellm_api_key: str = ""
         enabled: bool = True
 
     def __init__(self):
         self.valves = self.Valves()
 
     async def pipe(self, body: dict, __event_emitter__=None) -> str | StreamingResponse:
-        """Route message to analytics pipeline or Ollama passthrough based on intent."""
+        """Route message to analytics pipeline or LiteLLM passthrough based on intent."""
         if not self.valves.enabled:
             try:
-                return await _stream_ollama(
+                return await _stream_llm(
                     body.get("messages", []),
-                    self.valves.ollama_url,
-                    self.valves.ollama_model,
+                    self.valves.litellm_url,
+                    self.valves.litellm_model,
+                    self.valves.litellm_api_key,
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -388,7 +395,7 @@ class Pipe:
         user_messages = [m for m in messages if m.get("role") == "user"]
         if not user_messages:
             try:
-                return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -396,7 +403,7 @@ class Pipe:
         question = user_messages[-1].get("content", "").strip()
         if not question:
             try:
-                return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -405,7 +412,7 @@ class Pipe:
 
         if intent == INTENT_CHAT:
             try:
-                return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -426,8 +433,9 @@ class Pipe:
                 question,
                 self.valves.s3_bucket,
                 self.valves.aws_region,
-                self.valves.ollama_url,
-                self.valves.ollama_model,
+                self.valves.litellm_url,
+                self.valves.litellm_model,
+                self.valves.litellm_api_key,
             )
 
             if __event_emitter__:
@@ -441,9 +449,9 @@ class Pipe:
             return f"Analytics pipeline error: {e}"
 
 
-def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> str:
+def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> str:
     """Run full supervisor → query → summarize pipeline, return formatted response."""
-    supervisor = _run_supervisor(question, REGISTRY, ollama_url, ollama_model)
+    supervisor = _run_supervisor(question, REGISTRY, litellm_url, litellm_model, api_key)
 
     if supervisor["confidence"] == "low":
         return (
@@ -453,14 +461,14 @@ def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, 
 
     table = supervisor["table"]
 
-    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, ollama_url, ollama_model)
+    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, litellm_url, litellm_model, api_key)
     rows = query_result["rows"]
     capped = query_result["capped"]
 
     if not rows:
         return "No data found for that query."
 
-    summarize_result = _run_summarize(question, rows, capped, ollama_url, ollama_model)
+    summarize_result = _run_summarize(question, rows, capped, litellm_url, litellm_model, api_key)
     summary = summarize_result["summary"]
     chart_spec = summarize_result["chart_spec"]
 

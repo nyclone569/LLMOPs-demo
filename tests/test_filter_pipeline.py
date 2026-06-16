@@ -64,12 +64,12 @@ async def test_pipe_chat_returns_streaming_response():
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "explain linked lists"}]}
 
-    async def fake_stream(messages, ollama_url, model):
+    async def fake_stream(messages, litellm_url, model, api_key=""):
         async def gen():
             yield b"data: {}"
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    with patch("filter_analytics._stream_ollama", side_effect=fake_stream):
+    with patch("filter_analytics._stream_llm", side_effect=fake_stream):
         result = await pipe.pipe(body)
 
     assert isinstance(result, StreamingResponse)
