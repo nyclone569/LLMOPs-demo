@@ -1,7 +1,7 @@
 import pytest
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
 from filter_analytics import _strip_fences, _validate_sql, SQLValidationError
@@ -54,3 +54,55 @@ def test_validate_sql_allows_cte():
         "kpi_monthly_summary",
         {"kpi_monthly_summary"},
     )
+
+
+@pytest.mark.asyncio
+async def test_pipe_chat_returns_streaming_response():
+    from filter_analytics import Pipe
+    from starlette.responses import StreamingResponse
+
+    pipe = Pipe()
+    body = {"messages": [{"role": "user", "content": "explain linked lists"}]}
+
+    async def fake_stream(messages, ollama_url, model):
+        async def gen():
+            yield b"data: {}"
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    with patch("filter_analytics._stream_ollama", side_effect=fake_stream):
+        result = await pipe.pipe(body)
+
+    assert isinstance(result, StreamingResponse)
+
+
+@pytest.mark.asyncio
+async def test_pipe_analytics_emits_status_events():
+    from filter_analytics import Pipe
+
+    pipe = Pipe()
+    body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
+
+    emitted = []
+
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    with patch("filter_analytics._run_analytics", return_value="summary text"):
+        await pipe.pipe(body, __event_emitter__=mock_emitter)
+
+    assert len(emitted) == 2
+    assert emitted[0] == {"type": "status", "data": {"description": "Analyzing", "done": False}}
+    assert emitted[1] == {"type": "status", "data": {"description": "Analyzing", "done": True}}
+
+
+@pytest.mark.asyncio
+async def test_pipe_analytics_skips_emitter_when_none():
+    from filter_analytics import Pipe
+
+    pipe = Pipe()
+    body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
+
+    with patch("filter_analytics._run_analytics", return_value="summary text"):
+        result = await pipe.pipe(body, __event_emitter__=None)
+
+    assert result == "summary text"
