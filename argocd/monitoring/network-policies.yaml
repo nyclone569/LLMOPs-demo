@@ -2,12 +2,7 @@
 # Each policy enforces least-privilege ingress/egress per service role.
 
 ---
-# Ensure ollama and postgresql namespaces exist before applying their NetworkPolicies
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ollama
----
+# Ensure postgresql namespace exists before applying its NetworkPolicy
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -134,14 +129,6 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
-    # Ollama local LLM
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ollama
-      ports:
-        - protocol: TCP
-          port: 11434
     # External LLM provider APIs (HTTPS and HTTP), excluding private ranges
     - to:
         - ipBlock:
@@ -280,26 +267,3 @@ spec:
       ports:
         - protocol: TCP
           port: 4000
-
----
-# Ollama: ingress only from litellm; egress unrestricted (model pulls from internet)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: ollama-network-policy
-  namespace: ollama
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: litellm
-      ports:
-        - protocol: TCP
-          port: 11434
-  egress:
-    - {}

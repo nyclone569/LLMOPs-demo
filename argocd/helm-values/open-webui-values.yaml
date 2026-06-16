@@ -253,7 +253,7 @@ containerSecurityContext:
       - ALL
 
 # ============================================================================
-# AFFINITY — spread replicas across nodes, avoid Ollama node
+# AFFINITY — spread replicas across nodes
 # ============================================================================
 affinity:
   podAntiAffinity:
@@ -263,12 +263,6 @@ affinity:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: open-webui
-          topologyKey: kubernetes.io/hostname
-      - weight: 80
-        podAffinityTerm:
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: ollama
           topologyKey: kubernetes.io/hostname
 
 # ============================================================================
