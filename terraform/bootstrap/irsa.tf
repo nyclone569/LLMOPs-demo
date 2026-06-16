@@ -23,6 +23,10 @@ locals {
         namespace       = "open-webui"
         service_account = "open-webui"
       }
+      litellm = {
+        namespace       = "litellm"
+        service_account = "litellm"
+      }
     } : key => jsonencode({
       Version = "2012-10-17"
       Statement = [{

@@ -69,3 +69,8 @@ output "analytics_s3_bucket" {
   description = "S3 bucket name for NYC taxi analytics Parquet data"
   value       = aws_s3_bucket.analytics.id
 }
+
+output "litellm_role_arn" {
+  description = "IRSA role ARN for LiteLLM pod (Bedrock access)"
+  value       = aws_iam_role.litellm.arn
+}
