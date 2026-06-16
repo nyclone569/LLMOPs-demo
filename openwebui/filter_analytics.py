@@ -9,7 +9,7 @@ requirements:
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, field
+from pydantic import BaseModel
 from typing import Optional
 import httpx
 import json
@@ -321,13 +321,12 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
     return {"summary": summary, "chart_spec": chart_spec}
 
 
-@dataclass
-class Valves:
+class Valves(BaseModel):
     """Open WebUI admin-configurable settings for this filter."""
-    s3_bucket: str = field(default=S3_BUCKET)
-    aws_region: str = field(default=AWS_REGION)
-    ollama_url: str = field(default=OLLAMA_URL)
-    enabled: bool = field(default=True)
+    s3_bucket: str = S3_BUCKET
+    aws_region: str = AWS_REGION
+    ollama_url: str = OLLAMA_URL
+    enabled: bool = True
 
 
 class Filter:
