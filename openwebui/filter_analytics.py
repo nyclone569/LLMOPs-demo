@@ -3,7 +3,7 @@ title: NYC Taxi Analytics Filter
 author: llmops
 version: 1.0.0
 license: MIT
-requirements: duckdb==1.2.2
+requirements:
 """
 
 from __future__ import annotations
@@ -224,7 +224,7 @@ def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL)
     return {"table": table, "confidence": confidence, "reasoning": parsed.get("reasoning", "")}
 
 
-S3_BUCKET = "YOUR_BUCKET_NAME"  # overridden by Valves at runtime
+S3_BUCKET = "llmops-analytics-492372116094" 
 AWS_REGION = "ap-southeast-1"
 ROW_CAP = 200
 DUCKDB_TIMEOUT = 30

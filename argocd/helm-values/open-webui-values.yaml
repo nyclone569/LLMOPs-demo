@@ -108,6 +108,10 @@ extraEnvVars:
   - name: WEBUI_LOG_LEVEL
     value: "INFO"
 
+  # Allow Functions to import packages installed by the init container
+  - name: PYTHONPATH
+    value: "/app/backend/data/pip-packages"
+
   # SSO/OIDC Configuration — Google Workspace
   #
   # Provider URL is hard-coded to Google's discovery endpoint; only the
@@ -247,6 +251,28 @@ containerSecurityContext:
   capabilities:
     drop:
       - ALL
+
+# ============================================================================
+# EXTRA PACKAGES
+# Installs pip packages that Open WebUI Functions declare as requirements.
+# Runs as root in an init container so the install lands in the system
+# site-packages directory (/usr/local/lib/python3.11/site-packages), which
+# persists across Function loader invocations within the same pod lifetime.
+# The data volume mount (/app/backend/data) ensures the pod's PVC is available
+# if any package writes cache there.
+# ============================================================================
+extraInitContainers:
+  - name: install-pip-packages
+    image: ghcr.io/open-webui/open-webui:v0.9.5
+    command:
+      - sh
+      - -c
+      - pip install --target /app/backend/data/pip-packages duckdb==1.2.2
+    securityContext:
+      runAsUser: 0
+    volumeMounts:
+      - name: data
+        mountPath: /app/backend/data
 
 # ============================================================================
 # LABELS
