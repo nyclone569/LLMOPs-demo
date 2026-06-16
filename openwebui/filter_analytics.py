@@ -205,14 +205,14 @@ def _registry_as_prompt(registry: dict) -> str:
     return "\n".join(lines)
 
 
-def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL) -> dict:
+def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
     """Returns {"table": str, "confidence": "high|low", "reasoning": str}."""
     registry_text = _registry_as_prompt(registry)
     messages = [
         {"role": "system", "content": _SUPERVISOR_SYSTEM},
         {"role": "user", "content": f"Available tables:\n{registry_text}\n\nQuestion: {question}"},
     ]
-    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
     cleaned = _strip_fences(raw)
     parsed = json.loads(cleaned.strip())
     table = parsed.get("table", "")
@@ -240,7 +240,7 @@ Rules:
 - Do not use read_parquet(), httpfs, or any file functions"""
 
 
-def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL) -> dict:
+def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
     """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
@@ -250,7 +250,7 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         {"role": "system", "content": _QUERY_SYSTEM},
         {"role": "user", "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}"},
     ]
-    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
     sql = _strip_fences(raw)
     _validate_sql(sql, table, set(registry.keys()))
 
@@ -292,7 +292,7 @@ Rules:
 - No markdown, no explanation outside the JSON"""
 
 
-def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: str = OLLAMA_URL) -> dict:
+def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> dict:
     """Returns {"summary": str, "chart_spec": dict|None}."""
     rows_json = json.dumps(rows[:50], default=str)
     if capped:
@@ -305,7 +305,7 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
         {"role": "system", "content": _SUMMARIZE_SYSTEM},
         {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
     ]
-    raw = _ollama_chat(messages, ollama_url=ollama_url)
+    raw = _ollama_chat(messages, model=ollama_model, ollama_url=ollama_url)
     parsed = json.loads(_strip_fences(raw).strip())
     summary = parsed.get("summary", "").strip()
     chart_spec = parsed.get("chart_spec")
@@ -326,6 +326,7 @@ class Valves(BaseModel):
     s3_bucket: str = S3_BUCKET
     aws_region: str = AWS_REGION
     ollama_url: str = OLLAMA_URL
+    ollama_model: str = OLLAMA_MODEL
     enabled: bool = True
 
 
@@ -378,6 +379,7 @@ class Filter:
                 self.valves.s3_bucket,
                 self.valves.aws_region,
                 self.valves.ollama_url,
+                self.valves.ollama_model,
             )
         except Exception as e:
             traceback.print_exc()
@@ -397,9 +399,9 @@ class Filter:
         return body
 
 
-def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL) -> str:
+def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, ollama_url: str = OLLAMA_URL, ollama_model: str = OLLAMA_MODEL) -> str:
     """Run full supervisor → query → summarize pipeline, return formatted response."""
-    supervisor = _run_supervisor(question, REGISTRY, ollama_url)
+    supervisor = _run_supervisor(question, REGISTRY, ollama_url, ollama_model)
 
     if supervisor["confidence"] == "low":
         return (
@@ -409,14 +411,14 @@ def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, 
 
     table = supervisor["table"]
 
-    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, ollama_url)
+    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, ollama_url, ollama_model)
     rows = query_result["rows"]
     capped = query_result["capped"]
 
     if not rows:
         return "No data found for that query."
 
-    summarize_result = _run_summarize(question, rows, capped, ollama_url)
+    summarize_result = _run_summarize(question, rows, capped, ollama_url, ollama_model)
     summary = summarize_result["summary"]
     chart_spec = summarize_result["chart_spec"]
 
