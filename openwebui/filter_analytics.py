@@ -108,7 +108,7 @@ def _strip_fences(text: str) -> str:
 
 
 def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
-    stripped = sql.strip()
+    stripped = sql.strip().rstrip(";").strip()
     if _FILE_FUNCTIONS.search(stripped):
         raise SQLValidationError("file function not allowed (read_parquet, httpfs, COPY, etc.)")
     leading = stripped.upper().lstrip()
@@ -273,7 +273,7 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         {"role": "user", "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}"},
     ]
     raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
-    sql = _strip_fences(raw)
+    sql = _strip_fences(raw).rstrip(";").strip()
     _validate_sql(sql, table, set(registry.keys()))
 
     # Check whether the *top-level* query already has a LIMIT. Scanning the full
