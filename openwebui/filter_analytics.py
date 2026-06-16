@@ -338,24 +338,17 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
     return {"summary": summary, "chart_spec": chart_spec}
 
 
-class Valves(BaseModel):
-    """Open WebUI admin-configurable settings for this pipe."""
-    s3_bucket: str = S3_BUCKET
-    aws_region: str = AWS_REGION
-    ollama_url: str = OLLAMA_URL
-    ollama_model: str = OLLAMA_MODEL
-    enabled: bool = True
-
-
-# Module-level instance required for Open WebUI's Valves schema discovery
-# (hasattr check). Open WebUI mutates Pipe.valves directly when admin saves
-# changes — pipe() reads self.valves, so UI changes take effect correctly.
-valves = Valves()
-
-
 class Pipe:
+    class Valves(BaseModel):
+        """Open WebUI admin-configurable settings for this pipe."""
+        s3_bucket: str = S3_BUCKET
+        aws_region: str = AWS_REGION
+        ollama_url: str = OLLAMA_URL
+        ollama_model: str = OLLAMA_MODEL
+        enabled: bool = True
+
     def __init__(self):
-        self.valves = Valves()
+        self.valves = self.Valves()
 
     async def pipe(self, body: dict, __event_emitter__=None) -> str | StreamingResponse:
         """Route message to analytics pipeline or Ollama passthrough based on intent."""
