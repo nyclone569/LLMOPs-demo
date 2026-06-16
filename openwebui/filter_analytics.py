@@ -329,6 +329,9 @@ class Valves(BaseModel):
     enabled: bool = True
 
 
+valves = Valves()
+
+
 class Filter:
     def __init__(self):
         self.valves = Valves()
