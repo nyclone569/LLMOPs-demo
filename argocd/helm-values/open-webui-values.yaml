@@ -269,7 +269,8 @@ extraInitContainers:
       - -c
       - pip install --target /app/backend/data/pip-packages duckdb==1.2.2
     securityContext:
-      runAsUser: 0
+      runAsUser: 1000
+      runAsNonRoot: true
     volumeMounts:
       - name: data
         mountPath: /app/backend/data
