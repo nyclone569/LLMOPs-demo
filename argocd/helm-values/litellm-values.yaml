@@ -250,6 +250,8 @@ config:
       - claude-haiku:     [claude-sonnet, private-chat]
       # claude-sonnet itself: fall back to private-chat (Bedrock Nova Lite)
       - claude-sonnet:    [private-chat]
+      # private-chat: Bedrock Nova Lite is primary; fall back to gpt-4o-mini when quota exhausted
+      - private-chat:     [gpt-4o-mini]
     allowed_fails: 3
     cooldown_time: 60
     retry_policy:
