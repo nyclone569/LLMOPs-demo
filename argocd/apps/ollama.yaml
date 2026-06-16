@@ -21,12 +21,10 @@ spec:
 
         ollama:
           gpu:
-            enabled: true
-            type: nvidia
-            number: 1
+            enabled: false
           models:
             pull:
-              - qwen2.5-coder:7b
+              - llama3.2
 
         persistentVolume:
           enabled: true
@@ -35,21 +33,11 @@ spec:
 
         resources:
           requests:
-            cpu: "500m"
-            memory: "2Gi"
-            nvidia.com/gpu: "1"
+            cpu: "200m"
+            memory: "512Mi"
           limits:
-            cpu: "4000m"
-            memory: "14Gi"
-            nvidia.com/gpu: "1"
-
-        nodeSelector:
-          nodegroup: gpu
-
-        tolerations:
-          - key: nvidia.com/gpu
-            operator: Exists
-            effect: NoSchedule
+            cpu: "1900m"
+            memory: "6Gi"
 
         service:
           type: ClusterIP
@@ -91,6 +79,6 @@ spec:
 
   info:
     - name: Description
-      value: Ollama LLM server with GPU (g4dn.xlarge, NVIDIA T4)
+      value: Ollama LLM server (CPU, llama3.2) — GPU pending quota approval
     - name: Models
-      value: qwen2.5-coder:7b
+      value: llama3.2
