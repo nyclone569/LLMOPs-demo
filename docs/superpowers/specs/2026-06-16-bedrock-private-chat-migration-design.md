@@ -36,7 +36,7 @@ Before:
   _stream_ollama()    → Ollama pod
 
 After:
-  filter_analytics.py → LiteLLM proxy → Bedrock (amazon.nova-lite-v1:0, ap-southeast-1)
+  filter_analytics.py → LiteLLM proxy → Bedrock (apac.amazon.nova-lite-v1:0 inference profile, ap-southeast-1)
   _stream_llm()       → LiteLLM proxy → Bedrock
 ```
 
@@ -61,7 +61,7 @@ with Bedrock:
 ```yaml
 - model_name: private-chat
   litellm_params:
-    model: bedrock/amazon.nova-lite-v1:0
+    model: bedrock/apac.amazon.nova-lite-v1:0
     aws_region_name: ap-southeast-1
   model_info:
     mode: chat
@@ -150,7 +150,10 @@ resource "aws_iam_policy" "litellm_bedrock" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-      Resource = "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.nova-lite-v1:0"
+      Resource = [
+        "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:ap-southeast-1:492372116094:inference-profile/apac.amazon.nova-lite-v1:0",
+      ]
     }]
   })
 

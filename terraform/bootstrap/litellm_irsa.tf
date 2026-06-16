@@ -16,7 +16,10 @@ resource "aws_iam_policy" "litellm_bedrock" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-      Resource = "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.nova-lite-v1:0"
+      Resource = [
+        "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:ap-southeast-1:${local.account_id}:inference-profile/apac.amazon.nova-lite-v1:0",
+      ]
     }]
   })
 

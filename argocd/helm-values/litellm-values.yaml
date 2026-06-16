@@ -153,10 +153,10 @@ config:
       model_info:
         mode: chat
 
-    # Private Chat - Bedrock Nova Lite (replaces Ollama; low-cost, no in-cluster GPU needed)
+    # Private Chat - Bedrock Nova Lite via APAC cross-region inference profile
     - model_name: private-chat
       litellm_params:
-        model: bedrock/amazon.nova-lite-v1:0
+        model: bedrock/apac.amazon.nova-lite-v1:0
         aws_region_name: ap-southeast-1
       model_info:
         mode: chat
