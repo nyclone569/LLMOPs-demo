@@ -224,7 +224,7 @@ def _run_supervisor(question: str, registry: dict, ollama_url: str = OLLAMA_URL)
     return {"table": table, "confidence": confidence, "reasoning": parsed.get("reasoning", "")}
 
 
-S3_BUCKET = "llmops-analytics-492372116094" 
+S3_BUCKET = "llmops-analytics-492372116094"
 AWS_REGION = "ap-southeast-1"
 ROW_CAP = 200
 DUCKDB_TIMEOUT = 30
@@ -329,6 +329,9 @@ class Valves(BaseModel):
     enabled: bool = True
 
 
+# Module-level instance required for Open WebUI's Valves schema discovery
+# (hasattr check). Open WebUI mutates Filter.valves directly when admin saves
+# changes — inlet() reads self.valves, so UI changes take effect correctly.
 valves = Valves()
 
 

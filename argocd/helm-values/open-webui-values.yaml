@@ -254,12 +254,12 @@ containerSecurityContext:
 
 # ============================================================================
 # EXTRA PACKAGES
-# Installs pip packages that Open WebUI Functions declare as requirements.
-# Runs as root in an init container so the install lands in the system
-# site-packages directory (/usr/local/lib/python3.11/site-packages), which
-# persists across Function loader invocations within the same pod lifetime.
-# The data volume mount (/app/backend/data) ensures the pod's PVC is available
-# if any package writes cache there.
+# Installs pip packages needed by Open WebUI Functions into the persistent data
+# volume (/app/backend/data/pip-packages) as UID 1000 (non-root). PYTHONPATH
+# is set so the main container can import them. Uses the same image as the main
+# container to guarantee ABI compatibility for C extensions (duckdb .so).
+# Skips install if the package directory already exists to avoid re-downloading
+# on every pod restart.
 # ============================================================================
 extraInitContainers:
   - name: install-pip-packages
@@ -267,7 +267,7 @@ extraInitContainers:
     command:
       - sh
       - -c
-      - pip install --target /app/backend/data/pip-packages duckdb==1.2.2
+      - test -d /app/backend/data/pip-packages/duckdb || pip install --target /app/backend/data/pip-packages duckdb==1.2.2
     securityContext:
       runAsUser: 1000
       runAsNonRoot: true
