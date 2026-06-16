@@ -154,10 +154,18 @@ config:
         mode: chat
 
     # Private Chat - Bedrock Nova Lite via APAC cross-region inference profile
+    # Falls back to gpt-4o-mini when Bedrock daily token quota is exhausted
     - model_name: private-chat
       litellm_params:
         model: bedrock/apac.amazon.nova-lite-v1:0
         aws_region_name: ap-southeast-1
+      model_info:
+        mode: chat
+
+    - model_name: private-chat
+      litellm_params:
+        model: gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
       model_info:
         mode: chat
 
