@@ -33,6 +33,8 @@ spec:
             value: "1"
           - name: OLLAMA_FLASH_ATTENTION
             value: "1"
+          - name: OLLAMA_KEEP_ALIVE
+            value: "5m"
 
         persistentVolume:
           enabled: true

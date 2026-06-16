@@ -271,6 +271,15 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     sql = _strip_fences(raw)
     _validate_sql(sql, table, set(registry.keys()))
 
+    # Check whether the model already added a LIMIT; if not, inject ROW_CAP+1
+    # so DuckDB never materialises more rows than we'll show. The extra +1 lets
+    # us detect whether results were capped without a second COUNT query.
+    has_limit = bool(re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE))
+    if not has_limit:
+        sql_capped = f"SELECT * FROM ({sql}) _q LIMIT {ROW_CAP + 1}"
+    else:
+        sql_capped = sql
+
     import duckdb
     import os
 
@@ -283,7 +292,7 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
             conn.execute(f"SET s3_region='{aws_region}';")
             conn.execute("SET s3_use_credential_chain=true;")
             conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
-            return conn.execute(sql).fetchdf().to_dict(orient="records")
+            return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
         finally:
             conn.close()
 
@@ -294,8 +303,8 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         except FuturesTimeoutError:
             raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
 
-    before_cap = len(rows)
-    return {"sql": sql, "rows": rows[:ROW_CAP], "capped": before_cap > ROW_CAP}
+    capped = len(rows) > ROW_CAP
+    return {"sql": sql, "rows": rows[:ROW_CAP], "capped": capped}
 
 
 _SUMMARIZE_SYSTEM = """You are a business analytics summarizer for NYC yellow cab trip data.
