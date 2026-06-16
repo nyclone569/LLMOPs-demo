@@ -151,7 +151,8 @@ resource "aws_iam_policy" "litellm_bedrock" {
       Effect   = "Allow"
       Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
       Resource = [
-        "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.nova-lite-v1:0",
+        # Wildcard covers all 6 APAC regions the cross-region profile routes through
+        "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
         "arn:aws:bedrock:ap-southeast-1:492372116094:inference-profile/apac.amazon.nova-lite-v1:0",
       ]
     }]
