@@ -231,7 +231,7 @@ config:
     num_retries: 2
     timeout: 60
     fallbacks:
-      # Non-llama models: try claude-sonnet first, then llama as last resort
+      # Most aliases: try claude-sonnet first, then private-chat (Bedrock Nova Lite) as last resort
       - fast-chat:        [claude-sonnet, private-chat]
       - coding-assistant: [claude-sonnet, private-chat]
       - long-context:     [claude-sonnet, private-chat]
@@ -240,7 +240,7 @@ config:
       - gpt-4o-mini:      [claude-sonnet, private-chat]
       - gemini-2.0-flash: [claude-sonnet, private-chat]
       - claude-haiku:     [claude-sonnet, private-chat]
-      # claude-sonnet itself: fall back to llama only
+      # claude-sonnet itself: fall back to private-chat (Bedrock Nova Lite)
       - claude-sonnet:    [private-chat]
     allowed_fails: 3
     cooldown_time: 60
