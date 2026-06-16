@@ -339,7 +339,7 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, ollama_url: st
 
 
 class Valves(BaseModel):
-    """Open WebUI admin-configurable settings for this filter."""
+    """Open WebUI admin-configurable settings for this pipe."""
     s3_bucket: str = S3_BUCKET
     aws_region: str = AWS_REGION
     ollama_url: str = OLLAMA_URL
