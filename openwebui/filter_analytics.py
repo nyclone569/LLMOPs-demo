@@ -272,9 +272,11 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     _validate_sql(sql, table, set(registry.keys()))
 
     import duckdb
+    import os
 
     def _execute():
-        conn = duckdb.connect()
+        os.environ.setdefault("HOME", "/tmp")
+        conn = duckdb.connect(config={"memory_limit": "512MB"})
         try:
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
