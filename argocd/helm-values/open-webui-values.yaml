@@ -14,15 +14,15 @@ image:
 # ============================================================================
 # REPLICA COUNT
 # ============================================================================
-replicaCount: 2
+replicaCount: 1
 
 # ============================================================================
 # AUTOSCALING (HPA)
 # ============================================================================
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 5
+  minReplicas: 1
+  maxReplicas: 3
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
@@ -251,6 +251,19 @@ containerSecurityContext:
   capabilities:
     drop:
       - ALL
+
+# ============================================================================
+# AFFINITY — spread replicas across nodes
+# ============================================================================
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: open-webui
+          topologyKey: kubernetes.io/hostname
 
 # ============================================================================
 # EXTRA PACKAGES
