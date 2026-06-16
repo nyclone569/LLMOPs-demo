@@ -88,8 +88,9 @@ async def test_pipe_analytics_emits_status_events():
         emitted.append(event)
 
     with patch("filter_analytics._run_analytics", return_value="summary text"):
-        await pipe.pipe(body, __event_emitter__=mock_emitter)
+        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
+    assert result == "summary text"
     assert len(emitted) == 2
     assert emitted[0] == {"type": "status", "data": {"description": "Analyzing", "done": False}}
     assert emitted[1] == {"type": "status", "data": {"description": "Analyzing", "done": True}}
@@ -106,3 +107,17 @@ async def test_pipe_analytics_skips_emitter_when_none():
         result = await pipe.pipe(body, __event_emitter__=None)
 
     assert result == "summary text"
+
+
+@pytest.mark.asyncio
+async def test_pipe_ambiguous_returns_clarification():
+    from filter_analytics import Pipe
+
+    pipe = Pipe()
+    # "taxi" is a domain term but no analytics keyword → INTENT_AMBIGUOUS
+    body = {"messages": [{"role": "user", "content": "taxi"}]}
+
+    result = await pipe.pipe(body)
+
+    assert isinstance(result, str)
+    assert "analytics" in result.lower()
