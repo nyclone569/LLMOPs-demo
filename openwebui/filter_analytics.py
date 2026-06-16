@@ -271,13 +271,23 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     sql = _strip_fences(raw)
     _validate_sql(sql, table, set(registry.keys()))
 
-    # Check whether the model already added a LIMIT; if not, inject ROW_CAP+1
-    # so DuckDB never materialises more rows than we'll show. The extra +1 lets
-    # us detect whether results were capped without a second COUNT query.
-    has_limit = bool(re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE))
-    if not has_limit:
+    # Check whether the *top-level* query already has a LIMIT. Scanning the full
+    # SQL string would match LIMIT inside CTEs (e.g. WITH x AS (... LIMIT 500))
+    # and skip the outer cap, letting DuckDB materialise unbounded rows.
+    # Walk at depth=0 only to detect a true top-level LIMIT.
+    _depth, _top_limit = 0, False
+    for _tok in re.split(r'(\(|\))', sql):
+        if _tok == '(':
+            _depth += 1
+        elif _tok == ')':
+            _depth -= 1
+        elif _depth == 0 and re.search(r'\bLIMIT\s+\d+', _tok, re.IGNORECASE):
+            _top_limit = True
+            break
+    if not _top_limit:
         sql_capped = f"SELECT * FROM ({sql}) _q LIMIT {ROW_CAP + 1}"
     else:
+        # Model already added a top-level LIMIT; 512MB DuckDB cap is the backstop.
         sql_capped = sql
 
     import duckdb
