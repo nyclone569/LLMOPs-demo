@@ -136,14 +136,6 @@ config:
       model_info:
         mode: chat
 
-    - model_name: fast-chat
-      litellm_params:
-        model: ollama/llama3.2
-        api_base: http://ollama.ollama.svc.cluster.local:11434
-        timeout: 300
-      model_info:
-        mode: chat
-
     # Coding Assistant - Engineering and code review
     - model_name: coding-assistant
       litellm_params:
@@ -161,12 +153,11 @@ config:
       model_info:
         mode: chat
 
-    # Private Chat - Local models via Ollama in K8s (sensitive data)
+    # Private Chat - Bedrock Nova Lite (replaces Ollama; low-cost, no in-cluster GPU needed)
     - model_name: private-chat
       litellm_params:
-        model: ollama/llama3.2
-        api_base: http://ollama.ollama.svc.cluster.local:11434
-        timeout: 300
+        model: bedrock/amazon.nova-lite-v1:0
+        aws_region_name: ap-southeast-1
       model_info:
         mode: chat
 
@@ -231,13 +222,6 @@ config:
       litellm_params:
         model: gemini/gemini-2.0-flash
         api_key: os.environ/GEMINI_API_KEY
-      model_info:
-        mode: chat
-
-    - model_name: llama3.2
-      litellm_params:
-        model: ollama/llama3.2
-        api_base: http://ollama.ollama.svc.cluster.local:11434
       model_info:
         mode: chat
 
@@ -498,3 +482,11 @@ labels:
 # ============================================================================
 podAnnotations:
   prometheus.io/scrape: "false"
+
+# ============================================================================
+# SERVICE ACCOUNT — IRSA for Bedrock access
+# ============================================================================
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::492372116094:role/llmops-cluster-litellm
