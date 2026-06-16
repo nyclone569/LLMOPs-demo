@@ -1,5 +1,5 @@
 """
-title: NYC Taxi Analytics Filter
+title: NYC Taxi Analytics Pipe
 author: llmops
 version: 1.0.0
 license: MIT
@@ -360,20 +360,32 @@ class Pipe:
     async def pipe(self, body: dict, __event_emitter__=None) -> str | StreamingResponse:
         """Route message to analytics pipeline or Ollama passthrough based on intent."""
         if not self.valves.enabled:
-            return await _stream_ollama(
-                body.get("messages", []),
-                self.valves.ollama_url,
-                self.valves.ollama_model,
-            )
+            try:
+                return await _stream_ollama(
+                    body.get("messages", []),
+                    self.valves.ollama_url,
+                    self.valves.ollama_model,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                return f"Chat service error: {e}"
 
         messages = body.get("messages", [])
         user_messages = [m for m in messages if m.get("role") == "user"]
         if not user_messages:
-            return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+            try:
+                return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+            except Exception as e:
+                traceback.print_exc()
+                return f"Chat service error: {e}"
 
         question = user_messages[-1].get("content", "").strip()
         if not question:
-            return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+            try:
+                return await _stream_ollama(messages, self.valves.ollama_url, self.valves.ollama_model)
+            except Exception as e:
+                traceback.print_exc()
+                return f"Chat service error: {e}"
 
         intent = classify_intent(question)
 
