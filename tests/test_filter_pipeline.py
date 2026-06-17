@@ -218,25 +218,31 @@ async def test_pipe_chat_returns_streaming_response():
 @pytest.mark.asyncio
 async def test_pipe_analytics_emits_status_events():
     from filter_analytics import Pipe
-    from starlette.responses import StreamingResponse
 
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
+
+    emitted = []
+    async def mock_emitter(event):
+        emitted.append(event)
 
     async def fake_stream(*args, **kwargs):
         yield "> **Table:** `kpi`\n"
         yield "Summary"
 
     with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
-        result = await pipe.pipe(body, __event_emitter__=lambda e: None)
+        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
-    assert isinstance(result, StreamingResponse)
+    assert result == ""
+    message_events = [e for e in emitted if e["type"] == "message"]
+    assert len(message_events) == 2
+    assert message_events[0]["data"]["content"] == "> **Table:** `kpi`\n"
+    assert message_events[1]["data"]["content"] == "Summary"
 
 
 @pytest.mark.asyncio
 async def test_pipe_analytics_skips_emitter_when_none():
     from filter_analytics import Pipe
-    from starlette.responses import StreamingResponse
 
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
@@ -247,7 +253,7 @@ async def test_pipe_analytics_skips_emitter_when_none():
     with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
         result = await pipe.pipe(body, __event_emitter__=None)
 
-    assert isinstance(result, StreamingResponse)
+    assert result == "Response"
 
 
 @pytest.mark.asyncio
@@ -495,7 +501,6 @@ async def test_stream_analytics_yields_error_on_query_failure():
 @pytest.mark.asyncio
 async def test_full_pipe_integration_streams_trace_and_summary():
     from filter_analytics import Pipe
-    from starlette.responses import StreamingResponse
 
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue for taxi trips"}]}
@@ -530,12 +535,10 @@ async def test_full_pipe_integration_streams_trace_and_summary():
 
         result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
-        assert isinstance(result, StreamingResponse)
-        chunks = []
-        async for chunk in result.body_iterator:
-            chunks.append(chunk)
+    assert result == ""
 
-    full = "".join(chunks)
+    message_events = [e for e in emitted if e["type"] == "message"]
+    full = "".join(e["data"]["content"] for e in message_events)
 
     assert "> **Table:** `kpi_monthly_summary`" in full
     assert "Monthly revenue match" in full
@@ -547,6 +550,10 @@ async def test_full_pipe_integration_streams_trace_and_summary():
     embed_events = [e for e in emitted if e["type"] == "embeds"]
     assert len(embed_events) == 1
     assert "<html>chart</html>" in embed_events[0]["data"]["embeds"]
+
+    status_events = [e for e in emitted if e["type"] == "status"]
+    assert any("Selecting" in e["data"]["description"] for e in status_events)
+    assert any("Done" in e["data"]["description"] for e in status_events)
 
     status_events = [e for e in emitted if e["type"] == "status"]
     assert any("Selecting" in e["data"]["description"] for e in status_events)

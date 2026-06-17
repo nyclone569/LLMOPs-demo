@@ -993,7 +993,7 @@ class Pipe:
             )
 
         # INTENT_ANALYTICS
-        async def generate():
+        if __event_emitter__:
             async for chunk in _stream_analytics(
                 question,
                 self.valves.s3_bucket,
@@ -1006,6 +1006,21 @@ class Pipe:
                 self.valves.row_cap,
                 __event_emitter__,
             ):
-                yield chunk
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
+                await __event_emitter__({"type": "message", "data": {"content": chunk}})
+            return ""
+        else:
+            chunks = []
+            async for chunk in _stream_analytics(
+                question,
+                self.valves.s3_bucket,
+                self.valves.aws_region,
+                self.valves.litellm_url,
+                self.valves.litellm_model,
+                self.valves.litellm_api_key,
+                self.valves.registry_ttl,
+                self.valves.duckdb_timeout,
+                self.valves.row_cap,
+                None,
+            ):
+                chunks.append(chunk)
+            return "".join(chunks)
