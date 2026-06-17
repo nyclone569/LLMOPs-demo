@@ -391,6 +391,7 @@ async def test_stream_summary_yields_tokens():
     )
 
     class FakeResponse:
+        status_code = 200
         async def aiter_bytes(self):
             yield sse_lines
         async def __aenter__(self):

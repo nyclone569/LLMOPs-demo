@@ -778,7 +778,10 @@ async def _stream_summary(
     litellm_model: str = LITELLM_MODEL,
     api_key: str = "",
 ):
-    """Async generator yielding summary tokens from LiteLLM streaming response."""
+    """Async generator yielding summary tokens from LiteLLM streaming response.
+
+    Attempts streaming first; falls back to synchronous call if streaming fails.
+    """
     rows_json = json.dumps(rows[:50], default=str)
     if capped:
         cap_note = f" NOTE: results were capped at {ROW_CAP} rows; showing first 50."
@@ -790,35 +793,48 @@ async def _stream_summary(
         {"role": "system", "content": _SUMMARY_STREAM_SYSTEM},
         {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
     ]
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
-    async with httpx.AsyncClient() as client:
-        async with client.stream(
-            "POST",
-            litellm_url,
-            json={"model": litellm_model, "messages": messages, "stream": True},
-            headers=headers,
-            timeout=LITELLM_TIMEOUT,
-        ) as response:
-            buffer = ""
-            async for chunk in response.aiter_bytes():
-                buffer += chunk.decode("utf-8", errors="replace")
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        return
-                    try:
-                        parsed = json.loads(data)
-                        delta = parsed["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+    try:
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST",
+                litellm_url,
+                json={"model": litellm_model, "messages": messages, "stream": True},
+                headers=headers,
+                timeout=httpx.Timeout(LITELLM_TIMEOUT, connect=10.0),
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    raise RuntimeError(
+                        f"LiteLLM returned {response.status_code}: {body.decode('utf-8', errors='replace')[:200]}"
+                    )
+                buffer = ""
+                async for chunk in response.aiter_bytes():
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data == "[DONE]":
+                            return
+                        try:
+                            parsed = json.loads(data)
+                            delta = parsed["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+    except Exception as stream_err:
+        print(f"[analytics-pipe] Streaming summary failed: {stream_err}, falling back to sync")
+        traceback.print_exc()
+        result = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
+        yield result
 
 
 async def _stream_analytics(
@@ -906,6 +922,7 @@ async def _stream_analytics(
         async for token in _stream_summary(question, rows, capped, litellm_url, litellm_model, api_key):
             yield token
     except Exception as e:
+        traceback.print_exc()
         yield f"\n\n> **Error:** Could not generate summary — {e}\n"
 
     yield "\n"
