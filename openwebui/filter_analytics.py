@@ -857,7 +857,7 @@ async def _stream_analytics(
         return
 
     if emitter:
-        await emitter({"type": "status", "data": {"description": "Selecting table...", "done": False}})
+        await emitter({"type": "status", "data": {"description": "Selecting table from registry...", "done": False}})
     try:
         supervisor = _run_supervisor(question, registry, litellm_url, litellm_model, api_key)
     except Exception as e:
@@ -869,6 +869,10 @@ async def _stream_analytics(
     table = supervisor["table"]
     confidence = supervisor["confidence"]
     reasoning = supervisor["reasoning"]
+
+    if emitter:
+        await emitter({"type": "status", "data": {"description": f"Selected `{table}` — generating SQL...", "done": False}})
+
     yield f"> **Table:** `{table}` — {reasoning} (confidence: {confidence})\n"
 
     if confidence == "low":
@@ -877,8 +881,6 @@ async def _stream_analytics(
             await emitter({"type": "status", "data": {"description": "Done", "done": True}})
         return
 
-    if emitter:
-        await emitter({"type": "status", "data": {"description": "Generating SQL...", "done": False}})
     try:
         t0 = time.time()
         query_result = _run_query(
@@ -906,7 +908,7 @@ async def _stream_analytics(
         return
 
     if emitter:
-        await emitter({"type": "status", "data": {"description": "Preparing chart...", "done": False}})
+        await emitter({"type": "status", "data": {"description": f"Queried {len(rows)} rows — preparing chart...", "done": False}})
     try:
         chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
         if chart_spec:
@@ -915,8 +917,9 @@ async def _stream_analytics(
                 await emitter({"type": "embeds", "data": {"embeds": [html]}})
     except Exception:
         pass
+
     if emitter:
-        await emitter({"type": "status", "data": {"description": "Summarizing...", "done": False}})
+        await emitter({"type": "status", "data": {"description": "Writing summary...", "done": False}})
     yield "---\n\n"
     try:
         async for token in _stream_summary(question, rows, capped, litellm_url, litellm_model, api_key):
