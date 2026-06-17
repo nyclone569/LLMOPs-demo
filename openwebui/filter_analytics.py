@@ -714,62 +714,201 @@ def _run_query(
     return {"sql": sql, "rows": rows[:ROW_CAP], "capped": capped}
 
 
-_SUMMARIZE_SYSTEM = """You are a business analytics summarizer for NYC yellow cab trip data.
-Given a question and query result rows, output ONLY valid JSON:
-{
-  "summary": "<2-4 sentence business summary>",
-  "chart_spec": {"type": "bar|line|pie|table", "x": "<column>", "y": "<column>", "series": []}
-}
+
+_CHART_SPEC_SYSTEM = """You are a chart type selector for NYC yellow cab trip analytics.
+Given a question and column names from the query result, output ONLY valid JSON:
+{"chart_spec": {"type": "bar|line|pie|table", "x": "<column>", "y": "<column>"}}
 Rules:
-- summary must be 2-4 sentences, no bullet points
-- chart x and y must be column names from the provided rows
-- Revenue means total_fare_amount (excludes tips)
+- type must be one of: bar, line, pie, table
+- x and y must be column names from the provided list
+- Use "line" for time series or trends
+- Use "bar" for comparisons across categories
+- Use "pie" for market share or proportions (renders as sorted bar)
+- Use "table" when no chart makes sense
 - No markdown, no explanation outside the JSON"""
 
 
-def _run_summarize(
+def _run_chart_spec(
+    question: str,
+    rows: list[dict],
+    litellm_url: str = LITELLM_URL,
+    litellm_model: str = LITELLM_MODEL,
+    api_key: str = "",
+) -> dict | None:
+    """Returns chart_spec dict or None if invalid/error."""
+    if not rows:
+        return None
+    col_names = list(rows[0].keys())
+    messages = [
+        {"role": "system", "content": _CHART_SPEC_SYSTEM},
+        {"role": "user", "content": f"Question: {question}\nColumns: {', '.join(col_names)}"},
+    ]
+    try:
+        raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
+        parsed = json.loads(_strip_fences(raw).strip())
+        chart_spec = parsed.get("chart_spec")
+        if not chart_spec:
+            return None
+        col_set = set(col_names)
+        if (
+            chart_spec.get("x") not in col_set
+            or chart_spec.get("y") not in col_set
+            or chart_spec.get("type") not in {"bar", "line", "pie", "table"}
+        ):
+            return None
+        return chart_spec
+    except Exception:
+        return None
+
+
+_SUMMARY_STREAM_SYSTEM = """You are a business analytics summarizer for NYC yellow cab trip data.
+Given a question and query result rows, write a 2-4 sentence business summary.
+Rules:
+- Plain text only, no JSON, no markdown, no bullet points
+- Revenue means total_fare_amount (excludes tips)
+- Be specific with numbers from the data
+- No preamble like "Based on the data" — start directly with the insight"""
+
+
+async def _stream_summary(
     question: str,
     rows: list[dict],
     capped: bool,
     litellm_url: str = LITELLM_URL,
     litellm_model: str = LITELLM_MODEL,
     api_key: str = "",
-) -> dict:
-    """Returns {"summary": str, "chart_spec": dict|None}."""
+):
+    """Async generator yielding summary tokens from LiteLLM streaming response."""
     rows_json = json.dumps(rows[:50], default=str)
     if capped:
-        cap_note = (
-            f" NOTE: results were capped at {ROW_CAP} rows; showing first 50 to model."
-        )
+        cap_note = f" NOTE: results were capped at {ROW_CAP} rows; showing first 50."
     elif len(rows) > 50:
-        cap_note = f" NOTE: showing first 50 of {len(rows)} rows to model."
+        cap_note = f" NOTE: showing first 50 of {len(rows)} rows."
     else:
         cap_note = ""
     messages = [
-        {"role": "system", "content": _SUMMARIZE_SYSTEM},
-        {
-            "role": "user",
-            "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}",
-        },
+        {"role": "system", "content": _SUMMARY_STREAM_SYSTEM},
+        {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
     ]
-    raw = _llm_chat(
-        messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
-    )
-    parsed = json.loads(_strip_fences(raw).strip())
-    summary = parsed.get("summary", "").strip()
-    chart_spec = parsed.get("chart_spec")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-    # Validate chart_spec columns against actual row keys
-    if chart_spec and rows:
-        col_names = set(rows[0].keys())
-        if (
-            chart_spec.get("x") not in col_names
-            or chart_spec.get("y") not in col_names
-            or chart_spec.get("type") not in {"bar", "line", "pie", "table"}
-        ):
-            chart_spec = None
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            litellm_url,
+            json={"model": litellm_model, "messages": messages, "stream": True},
+            headers=headers,
+            timeout=LITELLM_TIMEOUT,
+        ) as response:
+            buffer = ""
+            async for chunk in response.aiter_bytes():
+                buffer += chunk.decode("utf-8", errors="replace")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        return
+                    try:
+                        parsed = json.loads(data)
+                        delta = parsed["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
 
-    return {"summary": summary, "chart_spec": chart_spec}
+
+async def _stream_analytics(
+    question: str,
+    s3_bucket: str,
+    aws_region: str,
+    litellm_url: str,
+    litellm_model: str,
+    api_key: str,
+    registry_ttl: int,
+    duckdb_timeout: int,
+    row_cap: int,
+    emitter,
+):
+    """Async generator: yields markdown chunks for the analytics reasoning trace + summary."""
+    try:
+        registry = _load_registry(s3_bucket, aws_region, registry_ttl)
+    except Exception as e:
+        yield f"> **Error:** Could not load schema registry — {e}\n"
+        return
+
+    if emitter:
+        await emitter({"type": "status", "data": {"description": "Selecting table...", "done": False}})
+    try:
+        supervisor = _run_supervisor(question, registry, litellm_url, litellm_model, api_key)
+    except Exception as e:
+        yield f"> **Error:** Table selection failed — {e}\n"
+        if emitter:
+            await emitter({"type": "status", "data": {"description": "Done", "done": True}})
+        return
+
+    table = supervisor["table"]
+    confidence = supervisor["confidence"]
+    reasoning = supervisor["reasoning"]
+    yield f"> **Table:** `{table}` — {reasoning} (confidence: {confidence})\n"
+
+    if confidence == "low":
+        yield "\nI wasn't confident which data to use. Could you be more specific?\n"
+        if emitter:
+            await emitter({"type": "status", "data": {"description": "Done", "done": True}})
+        return
+
+    if emitter:
+        await emitter({"type": "status", "data": {"description": "Generating SQL...", "done": False}})
+    try:
+        t0 = time.time()
+        query_result = _run_query(
+            question, table, registry, s3_bucket, aws_region,
+            litellm_url, litellm_model, api_key,
+        )
+        elapsed = time.time() - t0
+    except Exception as e:
+        yield f"> **Error:** {e}\n"
+        if emitter:
+            await emitter({"type": "status", "data": {"description": "Done", "done": True}})
+        return
+
+    rows = query_result["rows"]
+    sql = query_result["sql"]
+    capped = query_result["capped"]
+
+    yield f"> **SQL:**\n> ```sql\n> {sql}\n> ```\n"
+    yield f"> **Result:** {len(rows)} rows ({elapsed:.1f}s)\n\n"
+
+    if not rows:
+        yield "No data found for that query.\n"
+        if emitter:
+            await emitter({"type": "status", "data": {"description": "Done", "done": True}})
+        return
+
+    if emitter:
+        await emitter({"type": "status", "data": {"description": "Preparing chart...", "done": False}})
+    chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
+    if chart_spec:
+        html = build_html_artifact(chart_spec, rows)
+        if html and emitter:
+            await emitter({"type": "embeds", "data": {"embeds": [html]}})
+
+    if emitter:
+        await emitter({"type": "status", "data": {"description": "Summarizing...", "done": False}})
+    yield "---\n\n"
+    try:
+        async for token in _stream_summary(question, rows, capped, litellm_url, litellm_model, api_key):
+            yield token
+    except Exception as e:
+        yield f"\n\n> **Error:** Could not generate summary — {e}\n"
+
+    yield "\n"
+    if emitter:
+        await emitter({"type": "status", "data": {"description": "Done", "done": True}})
 
 
 class Pipe:
@@ -852,103 +991,19 @@ class Pipe:
             )
 
         # INTENT_ANALYTICS
-        try:
-            if __event_emitter__:
-                await __event_emitter__(
-                    {
-                        "type": "status",
-                        "data": {"description": "Analyzing", "done": False},
-                    }
-                )
-
-            result = _run_analytics(
+        async def generate():
+            async for chunk in _stream_analytics(
                 question,
                 self.valves.s3_bucket,
                 self.valves.aws_region,
                 self.valves.litellm_url,
                 self.valves.litellm_model,
                 self.valves.litellm_api_key,
-            )
+                self.valves.registry_ttl,
+                self.valves.duckdb_timeout,
+                self.valves.row_cap,
+                __event_emitter__,
+            ):
+                yield chunk
 
-            if __event_emitter__ and result.get("html"):
-                await __event_emitter__(
-                    {
-                        "type": "embeds",
-                        "data": {"embeds": [result["html"]]},
-                    }
-                )
-
-            if __event_emitter__:
-                await __event_emitter__(
-                    {
-                        "type": "status",
-                        "data": {"description": "Analyzing", "done": True},
-                    }
-                )
-
-            return result["text"]
-        except Exception as e:
-            traceback.print_exc()
-            if __event_emitter__:
-                await __event_emitter__(
-                    {
-                        "type": "status",
-                        "data": {"description": "Analyzing", "done": True},
-                    }
-                )
-            return f"Analytics pipeline error: {e}"
-
-
-def _run_analytics(
-    question: str,
-    s3_bucket: str,
-    aws_region: str = AWS_REGION,
-    litellm_url: str = LITELLM_URL,
-    litellm_model: str = LITELLM_MODEL,
-    api_key: str = "",
-    registry_ttl: int = 300,
-) -> dict:
-    """Run full supervisor → query → summarize pipeline, return {text, html}."""
-    registry = _load_registry(s3_bucket, aws_region, ttl=registry_ttl)
-    supervisor = _run_supervisor(
-        question, registry, litellm_url, litellm_model, api_key
-    )
-
-    if supervisor["confidence"] == "low":
-        return {
-            "text": (
-                "I wasn't confident which data to use for that question. "
-                f"Could you be more specific? ({supervisor['reasoning']})"
-            ),
-            "html": None,
-        }
-
-    table = supervisor["table"]
-
-    query_result = _run_query(
-        question,
-        table,
-        registry,
-        s3_bucket,
-        aws_region,
-        litellm_url,
-        litellm_model,
-        api_key,
-    )
-    rows = query_result["rows"]
-    capped = query_result["capped"]
-
-    if not rows:
-        return {"text": "No data found for that query.", "html": None}
-
-    summarize_result = _run_summarize(
-        question, rows, capped, litellm_url, litellm_model, api_key
-    )
-    summary = summarize_result["summary"]
-    chart_spec = summarize_result["chart_spec"]
-
-    html = None
-    if chart_spec:
-        html = build_html_artifact(chart_spec, rows)
-
-    return {"text": summary, "html": html}
+        return StreamingResponse(generate(), media_type="text/event-stream")

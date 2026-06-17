@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, mock_open
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
-from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite, _load_registry
+from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite, _load_registry, _stream_summary, _stream_analytics
 
 
 class _FakeHTTPResponse:
@@ -195,45 +195,6 @@ def test_persist_html_artifact_creates_openwebui_html_file_marker(tmp_path):
     assert upload_dir in Path(row[2]).parents
 
 
-def test_run_analytics_returns_html_file_embed_not_raw_html():
-    from filter_analytics import _run_analytics
-
-    rows = [
-        {"pickup_year": 2024, "pickup_month": 1, "total_revenue": 10.0},
-        {"pickup_year": 2024, "pickup_month": 2, "total_revenue": 20.0},
-    ]
-
-    with patch(
-        "filter_analytics._load_registry",
-        return_value=_SAMPLE_REGISTRY,
-    ), patch(
-        "filter_analytics._run_supervisor",
-        return_value={
-            "table": "kpi_monthly_summary",
-            "confidence": "high",
-            "reasoning": "Monthly revenue question.",
-        },
-    ), patch(
-        "filter_analytics._run_query",
-        return_value={
-            "sql": "SELECT pickup_year, pickup_month, total_revenue FROM kpi_monthly_summary",
-            "rows": rows,
-            "capped": False,
-        },
-    ), patch(
-        "filter_analytics._run_summarize",
-        return_value={
-            "summary": "Revenue increased in February.",
-            "chart_spec": {"type": "line", "x": "pickup_month", "y": "total_revenue", "series": []},
-        },
-    ):
-        result = _run_analytics("show monthly revenue trend", "bucket")
-
-    assert result["text"] == "Revenue increased in February."
-    assert result["html"] is not None
-    assert "vegaEmbed" in result["html"]
-    assert "iframe:height" in result["html"]
-
 
 @pytest.mark.asyncio
 async def test_pipe_chat_returns_streaming_response():
@@ -257,35 +218,36 @@ async def test_pipe_chat_returns_streaming_response():
 @pytest.mark.asyncio
 async def test_pipe_analytics_emits_status_events():
     from filter_analytics import Pipe
+    from starlette.responses import StreamingResponse
 
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
 
-    emitted = []
+    async def fake_stream(*args, **kwargs):
+        yield "> **Table:** `kpi`\n"
+        yield "Summary"
 
-    async def mock_emitter(event):
-        emitted.append(event)
+    with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
+        result = await pipe.pipe(body, __event_emitter__=lambda e: None)
 
-    with patch("filter_analytics._run_analytics", return_value={"text": "summary text", "html": None}):
-        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
-
-    assert result == "summary text"
-    assert len(emitted) == 2
-    assert emitted[0] == {"type": "status", "data": {"description": "Analyzing", "done": False}}
-    assert emitted[1] == {"type": "status", "data": {"description": "Analyzing", "done": True}}
+    assert isinstance(result, StreamingResponse)
 
 
 @pytest.mark.asyncio
 async def test_pipe_analytics_skips_emitter_when_none():
     from filter_analytics import Pipe
+    from starlette.responses import StreamingResponse
 
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
 
-    with patch("filter_analytics._run_analytics", return_value={"text": "summary text", "html": None}):
+    async def fake_stream(*args, **kwargs):
+        yield "Response"
+
+    with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
         result = await pipe.pipe(body, __event_emitter__=None)
 
-    assert result == "summary text"
+    assert isinstance(result, StreamingResponse)
 
 
 @pytest.mark.asyncio
@@ -376,3 +338,216 @@ def test_load_registry_first_call_failure_raises():
     with patch("filter_analytics._fetch_registry_from_s3", side_effect=RuntimeError("S3 unavailable")):
         with pytest.raises(RuntimeError, match="S3 unavailable"):
             _load_registry("my-bucket", "ap-southeast-1", ttl=300)
+
+
+# ---------------------------------------------------------------------------
+# _run_chart_spec tests
+# ---------------------------------------------------------------------------
+
+def test_run_chart_spec_returns_valid_spec():
+    from filter_analytics import _run_chart_spec
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}, {"pickup_month": 2, "total_revenue": 20.0}]
+    llm_response = '{"chart_spec": {"type": "line", "x": "pickup_month", "y": "total_revenue"}}'
+    with patch("filter_analytics._llm_chat", return_value=llm_response):
+        result = _run_chart_spec("show revenue trend", rows)
+    assert result == {"type": "line", "x": "pickup_month", "y": "total_revenue"}
+
+
+def test_run_chart_spec_returns_none_on_invalid_columns():
+    from filter_analytics import _run_chart_spec
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    llm_response = '{"chart_spec": {"type": "bar", "x": "nonexistent", "y": "total_revenue"}}'
+    with patch("filter_analytics._llm_chat", return_value=llm_response):
+        result = _run_chart_spec("show revenue", rows)
+    assert result is None
+
+
+def test_run_chart_spec_returns_none_on_llm_error():
+    from filter_analytics import _run_chart_spec
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    with patch("filter_analytics._llm_chat", side_effect=Exception("LLM timeout")):
+        result = _run_chart_spec("show revenue", rows)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _stream_summary tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_summary_yields_tokens():
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+
+    sse_lines = (
+        b'data: {"choices":[{"delta":{"content":"Revenue "}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"grew."}}]}\n\n'
+        b'data: [DONE]\n\n'
+    )
+
+    class FakeResponse:
+        async def aiter_bytes(self):
+            yield sse_lines
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+
+    class FakeClient:
+        def stream(self, *args, **kwargs):
+            return FakeResponse()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+
+    with patch("httpx.AsyncClient", return_value=FakeClient()):
+        tokens = []
+        async for token in _stream_summary("show revenue", rows, capped=False):
+            tokens.append(token)
+
+    assert "".join(tokens) == "Revenue grew."
+
+
+# ---------------------------------------------------------------------------
+# _stream_analytics tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_analytics_yields_reasoning_trace_and_summary():
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [{"name": "pickup_month", "type": "int32"}, {"name": "total_revenue", "type": "double"}], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    async def fake_summary(*args, **kwargs):
+        yield "Revenue "
+        yield "grew."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "line", "x": "pickup_month", "y": "total_revenue"}), \
+         patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_summary()):
+
+        chunks = []
+        async for chunk in _stream_analytics("show revenue trend", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    full_response = "".join(chunks)
+    assert "> **Table:**" in full_response
+    assert "kpi_monthly_summary" in full_response
+    assert "> **SQL:**" in full_response
+    assert "> **Result:**" in full_response
+    assert "---" in full_response
+    assert "Revenue grew." in full_response
+    status_events = [e for e in emitted if e["type"] == "status"]
+    assert len(status_events) >= 4
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_yields_clarification_on_low_confidence():
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "low", "reasoning": "Unclear question"}):
+
+        chunks = []
+        async for chunk in _stream_analytics("something vague", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    full_response = "".join(chunks)
+    assert "confidence: low" in full_response
+    assert "more specific" in full_response.lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_yields_error_on_query_failure():
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Good match"}), \
+         patch("filter_analytics._run_query", side_effect=TimeoutError("DuckDB query exceeded 30s")):
+
+        chunks = []
+        async for chunk in _stream_analytics("show revenue", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    full_response = "".join(chunks)
+    assert "> **Error:**" in full_response
+    assert "30s" in full_response
+
+
+# ---------------------------------------------------------------------------
+# Full integration test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_full_pipe_integration_streams_trace_and_summary():
+    from filter_analytics import Pipe
+    from starlette.responses import StreamingResponse
+
+    pipe = Pipe()
+    body = {"messages": [{"role": "user", "content": "show monthly revenue for taxi trips"}]}
+
+    emitted = []
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    rows = [
+        {"pickup_month": 1, "total_revenue": 10.0},
+        {"pickup_month": 2, "total_revenue": 20.0},
+    ]
+    registry = {
+        "kpi_monthly_summary": {
+            "tier": "kpi",
+            "columns": [{"name": "pickup_month", "type": "int32"}, {"name": "total_revenue", "type": "double"}],
+            "example_questions": ["show monthly revenue"],
+            "description": "Monthly aggregated revenue",
+        }
+    }
+
+    async def fake_stream_summary(*args, **kwargs):
+        yield "Revenue grew "
+        yield "from $10M to $20M."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue match"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "line", "x": "pickup_month", "y": "total_revenue"}), \
+         patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_stream_summary()):
+
+        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
+
+        assert isinstance(result, StreamingResponse)
+        chunks = []
+        async for chunk in result.body_iterator:
+            chunks.append(chunk)
+
+    full = "".join(chunks)
+
+    assert "> **Table:** `kpi_monthly_summary`" in full
+    assert "Monthly revenue match" in full
+    assert "> **SQL:**" in full
+    assert "> **Result:** 2 rows" in full
+    assert "---" in full
+    assert "Revenue grew from $10M to $20M." in full
+
+    embed_events = [e for e in emitted if e["type"] == "embeds"]
+    assert len(embed_events) == 1
+    assert "<html>chart</html>" in embed_events[0]["data"]["embeds"]
+
+    status_events = [e for e in emitted if e["type"] == "status"]
+    assert any("Selecting" in e["data"]["description"] for e in status_events)
+    assert any("Done" in e["data"]["description"] for e in status_events)
