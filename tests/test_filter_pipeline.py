@@ -1,11 +1,13 @@
 import pytest
 import sqlite3
 import sys
+import time
+import json
 from pathlib import Path
 from unittest.mock import patch, mock_open
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
-from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite
+from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite, _load_registry
 
 
 class _FakeHTTPResponse:
@@ -27,6 +29,16 @@ class _FakeConn:
 
     def execute(self, sql):
         self.sql.append(sql)
+
+
+_SAMPLE_REGISTRY = {
+    "kpi_monthly_summary": {
+        "description": "Monthly KPI summary",
+        "tier": "kpi",
+        "columns": [{"name": "trip_count", "type": "int64"}],
+        "example_questions": [],
+    }
+}
 
 
 def test_strip_fences_removes_sql_block():
@@ -192,6 +204,9 @@ def test_run_analytics_returns_html_file_embed_not_raw_html():
     ]
 
     with patch(
+        "filter_analytics._load_registry",
+        return_value=_SAMPLE_REGISTRY,
+    ), patch(
         "filter_analytics._run_supervisor",
         return_value={
             "table": "kpi_monthly_summary",
@@ -211,18 +226,13 @@ def test_run_analytics_returns_html_file_embed_not_raw_html():
             "summary": "Revenue increased in February.",
             "chart_spec": {"type": "line", "x": "pickup_month", "y": "total_revenue", "series": []},
         },
-    ), patch(
-        "filter_analytics._persist_html_artifact",
-        return_value='<file type="html" id="chart-1">',
-        create=True,
     ):
         result = _run_analytics("show monthly revenue trend", "bucket")
 
-    assert "Revenue increased in February." in result
-    assert '<file type="html" id="chart-1">' in result
-    assert '</file>' not in result
-    assert "<!DOCTYPE html>" not in result
-    assert "vegaEmbed" not in result
+    assert result["text"] == "Revenue increased in February."
+    assert result["html"] is not None
+    assert "vegaEmbed" in result["html"]
+    assert "iframe:height" in result["html"]
 
 
 @pytest.mark.asyncio
@@ -256,7 +266,7 @@ async def test_pipe_analytics_emits_status_events():
     async def mock_emitter(event):
         emitted.append(event)
 
-    with patch("filter_analytics._run_analytics", return_value="summary text"):
+    with patch("filter_analytics._run_analytics", return_value={"text": "summary text", "html": None}):
         result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
     assert result == "summary text"
@@ -272,7 +282,7 @@ async def test_pipe_analytics_skips_emitter_when_none():
     pipe = Pipe()
     body = {"messages": [{"role": "user", "content": "show monthly revenue trend for taxi trips"}]}
 
-    with patch("filter_analytics._run_analytics", return_value="summary text"):
+    with patch("filter_analytics._run_analytics", return_value={"text": "summary text", "html": None}):
         result = await pipe.pipe(body, __event_emitter__=None)
 
     assert result == "summary text"
@@ -290,3 +300,79 @@ async def test_pipe_ambiguous_returns_clarification():
 
     assert isinstance(result, str)
     assert "analytics" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# _load_registry TTL cache tests
+# ---------------------------------------------------------------------------
+
+_SAMPLE_REGISTRY = {
+    "kpi_monthly_summary": {
+        "description": "Monthly KPI summary",
+        "tier": "kpi",
+        "columns": [{"name": "trip_count", "type": "int64"}],
+        "example_questions": [],
+    }
+}
+
+
+def _reset_registry_cache():
+    """Reset the module-level cache between tests."""
+    import filter_analytics
+    filter_analytics._registry_cache = None
+    filter_analytics._registry_ts = 0.0
+
+
+def test_load_registry_cache_hit_returns_cached_without_fetch():
+    """When TTL has not expired, return the cached registry without calling fetch."""
+    import filter_analytics
+    _reset_registry_cache()
+
+    # Prime the cache manually
+    filter_analytics._registry_cache = _SAMPLE_REGISTRY
+    filter_analytics._registry_ts = time.time()  # just fetched
+
+    with patch("filter_analytics._fetch_registry_from_s3") as mock_fetch:
+        result = _load_registry("my-bucket", "ap-southeast-1", ttl=300)
+
+    mock_fetch.assert_not_called()
+    assert result == _SAMPLE_REGISTRY
+
+
+def test_load_registry_cache_miss_fetches_from_s3():
+    """When TTL has expired (or no cache), fetch from S3 and update the cache."""
+    import filter_analytics
+    _reset_registry_cache()
+
+    with patch("filter_analytics._fetch_registry_from_s3", return_value=_SAMPLE_REGISTRY) as mock_fetch:
+        result = _load_registry("my-bucket", "ap-southeast-1", ttl=300)
+
+    mock_fetch.assert_called_once_with("my-bucket", "ap-southeast-1")
+    assert result == _SAMPLE_REGISTRY
+    assert filter_analytics._registry_cache == _SAMPLE_REGISTRY
+    assert filter_analytics._registry_ts > 0
+
+
+def test_load_registry_stale_cache_fallback_on_s3_error():
+    """When S3 fetch fails but we have a stale cache, return stale data instead of raising."""
+    import filter_analytics
+    _reset_registry_cache()
+
+    stale = {"old_table": {"description": "old", "tier": "kpi", "columns": [], "example_questions": []}}
+    filter_analytics._registry_cache = stale
+    filter_analytics._registry_ts = 0.0  # expired TTL
+
+    with patch("filter_analytics._fetch_registry_from_s3", side_effect=RuntimeError("S3 unavailable")):
+        result = _load_registry("my-bucket", "ap-southeast-1", ttl=300)
+
+    assert result == stale
+
+
+def test_load_registry_first_call_failure_raises():
+    """When there's no cache and S3 fetch fails, propagate the exception."""
+    import filter_analytics
+    _reset_registry_cache()
+
+    with patch("filter_analytics._fetch_registry_from_s3", side_effect=RuntimeError("S3 unavailable")):
+        with pytest.raises(RuntimeError, match="S3 unavailable"):
+            _load_registry("my-bucket", "ap-southeast-1", ttl=300)

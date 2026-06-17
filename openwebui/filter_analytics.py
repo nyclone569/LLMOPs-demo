@@ -27,15 +27,49 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 DOMAIN_TERMS = {
-    "taxi", "trip", "trips", "fare", "borough", "zone", "pickup", "dropoff",
-    "vendor", "route", "revenue", "passenger", "passengers", "yellow", "green",
-    "fhv", "manhattan", "brooklyn", "queens", "bronx", "staten island",
+    "taxi",
+    "trip",
+    "trips",
+    "fare",
+    "borough",
+    "zone",
+    "pickup",
+    "dropoff",
+    "vendor",
+    "route",
+    "revenue",
+    "passenger",
+    "passengers",
+    "yellow",
+    "green",
+    "fhv",
+    "manhattan",
+    "brooklyn",
+    "queens",
+    "bronx",
+    "staten island",
 }
 
 ANALYTICS_WORDS = {
-    "how many", "average", "total", "compare", "top", "trend", "count",
-    "per", "rate", "show", "summary", "breakdown", "most", "least", "peak",
-    "weekly", "monthly", "daily", "hourly",
+    "how many",
+    "average",
+    "total",
+    "compare",
+    "top",
+    "trend",
+    "count",
+    "per",
+    "rate",
+    "show",
+    "summary",
+    "breakdown",
+    "most",
+    "least",
+    "peak",
+    "weekly",
+    "monthly",
+    "daily",
+    "hourly",
 }
 
 INTENT_ANALYTICS = "analytics"
@@ -48,13 +82,11 @@ def classify_intent(message: str) -> str:
     lower = message.lower()
 
     domain_count = sum(
-        1 for term in DOMAIN_TERMS
-        if re.search(rf'\b{re.escape(term)}\b', lower)
+        1 for term in DOMAIN_TERMS if re.search(rf"\b{re.escape(term)}\b", lower)
     )
 
     analytics_count = sum(
-        1 for word in ANALYTICS_WORDS
-        if re.search(rf'\b{re.escape(word)}\b', lower)
+        1 for word in ANALYTICS_WORDS if re.search(rf"\b{re.escape(word)}\b", lower)
     )
 
     if domain_count >= 1 and analytics_count >= 1:
@@ -120,7 +152,9 @@ def _strip_fences(text: str) -> str:
 def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
     stripped = sql.strip().rstrip(";").strip()
     if _FILE_FUNCTIONS.search(stripped):
-        raise SQLValidationError("file function not allowed (read_parquet, httpfs, COPY, etc.)")
+        raise SQLValidationError(
+            "file function not allowed (read_parquet, httpfs, COPY, etc.)"
+        )
     leading = stripped.upper().lstrip()
     if not (leading.startswith("SELECT") or leading.startswith("WITH")):
         raise SQLValidationError("SQL must start with SELECT or WITH")
@@ -133,10 +167,15 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
     found = set(re.findall(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE))
     found |= set(re.findall(r"\bJOIN\s+(\w+)", stripped, re.IGNORECASE))
     # CTE names are valid references — exclude them from the foreign-table check
-    cte_names = {m.lower() for m in re.findall(r"\bWITH\s+(\w+)\s+AS\s*\(", stripped, re.IGNORECASE)}
+    cte_names = {
+        m.lower()
+        for m in re.findall(r"\bWITH\s+(\w+)\s+AS\s*\(", stripped, re.IGNORECASE)
+    }
     for t in found:
         if t.lower() != expected_table.lower() and t.lower() not in cte_names:
-            raise SQLValidationError(f"Table '{t}' not allowed — expected '{expected_table}'")
+            raise SQLValidationError(
+                f"Table '{t}' not allowed — expected '{expected_table}'"
+            )
 
 
 def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
@@ -158,15 +197,23 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
   <style>
-    html, body {{ margin: 0; padding: 0; width: 100%; min-height: 420px; }}
-    #chart {{ width: 100%; height: 420px; min-height: 420px; }}
+    html, body {{ margin: 0; padding: 0; width: 100%; }}
+    #chart {{ width: 100%; min-height: 420px; }}
     .vega-embed, .vega-embed > canvas, .vega-embed > svg {{ max-width: 100%; }}
   </style>
 </head>
 <body>
   <div id="chart"></div>
   <script>
-    vegaEmbed('#chart', {spec_json}, {{actions: false, renderer: 'canvas'}});
+    function reportHeight() {{
+      var h = document.documentElement.scrollHeight;
+      parent.postMessage({{ type: 'iframe:height', height: h }}, '*');
+    }}
+    vegaEmbed('#chart', {spec_json}, {{actions: false, renderer: 'canvas'}}).then(function() {{
+      reportHeight();
+    }});
+    new ResizeObserver(reportHeight).observe(document.body);
+    window.addEventListener('load', reportHeight);
   </script>
 </body>
 </html>"""
@@ -176,12 +223,15 @@ def _webui_upload_dir() -> str:
     """Return Open WebUI's upload directory, with a local default for the pod."""
     try:
         from open_webui.config import UPLOAD_DIR
+
         return str(UPLOAD_DIR)
     except Exception:
         return os.getenv("UPLOAD_DIR", "/app/backend/data/uploads")
 
 
-def _persist_html_artifact(html: str, db_path: str | None = None, upload_dir: str | None = None) -> str:
+def _persist_html_artifact(
+    html: str, db_path: str | None = None, upload_dir: str | None = None
+) -> str:
     """Persist an HTML artifact where Open WebUI can render it as an iframe.
 
     Open WebUI's frontend turns <file type="html" id="..."> tokens into a
@@ -203,7 +253,9 @@ def _persist_html_artifact(html: str, db_path: str | None = None, upload_dir: st
             "SELECT id FROM user WHERE role = 'admin' ORDER BY created_at LIMIT 1"
         ).fetchone()
         if not admin:
-            raise RuntimeError("Open WebUI HTML chart rendering requires an admin user row")
+            raise RuntimeError(
+                "Open WebUI HTML chart rendering requires an admin user row"
+            )
 
         upload_root.mkdir(parents=True, exist_ok=True)
         file_path.write_text(html, encoding="utf-8")
@@ -217,11 +269,13 @@ def _persist_html_artifact(html: str, db_path: str | None = None, upload_dir: st
                 file_id,
                 admin[0],
                 filename,
-                json.dumps({
-                    "name": filename,
-                    "content_type": "text/html",
-                    "size": len(html_bytes),
-                }),
+                json.dumps(
+                    {
+                        "name": filename,
+                        "content_type": "text/html",
+                        "size": len(html_bytes),
+                    }
+                ),
                 now,
                 hashlib.sha256(html_bytes).hexdigest(),
                 json.dumps({}),
@@ -248,7 +302,12 @@ LITELLM_MODEL = "private-chat"
 LITELLM_TIMEOUT = 60
 
 
-def _llm_chat(messages: list[dict], model: str = LITELLM_MODEL, litellm_url: str = LITELLM_URL, api_key: str = "") -> str:
+def _llm_chat(
+    messages: list[dict],
+    model: str = LITELLM_MODEL,
+    litellm_url: str = LITELLM_URL,
+    api_key: str = "",
+) -> str:
     """HTTP call to LiteLLM OpenAI-compatible endpoint."""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     resp = httpx.post(
@@ -261,7 +320,12 @@ def _llm_chat(messages: list[dict], model: str = LITELLM_MODEL, litellm_url: str
     return resp.json()["choices"][0]["message"]["content"]
 
 
-async def _stream_llm(messages: list[dict], litellm_url: str = LITELLM_URL, model: str = LITELLM_MODEL, api_key: str = "") -> StreamingResponse:
+async def _stream_llm(
+    messages: list[dict],
+    litellm_url: str = LITELLM_URL,
+    model: str = LITELLM_MODEL,
+    api_key: str = "",
+) -> StreamingResponse:
     """Stream LiteLLM response as SSE bytes."""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
@@ -280,8 +344,145 @@ async def _stream_llm(messages: list[dict], litellm_url: str = LITELLM_URL, mode
     return StreamingResponse(generator(), media_type="text/event-stream")
 
 
-# Registry bundled as constant — matches schema_registry.json at repo root.
-REGISTRY: dict = {'dim_date': {'description': 'Dim Date — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'date', 'type': 'date32[day]'}, {'name': 'year', 'type': 'int64'}, {'name': 'month', 'type': 'int64'}, {'name': 'day', 'type': 'int64'}, {'name': 'day_of_week', 'type': 'int64'}, {'name': 'is_weekend', 'type': 'bool'}, {'name': 'is_holiday', 'type': 'bool'}, {'name': 'quarter', 'type': 'int64'}, {'name': 'week_of_year', 'type': 'int64'}], 'example_questions': []}, 'dim_payment_type': {'description': 'Dim Payment Type — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'payment_type_code', 'type': 'int32'}, {'name': 'description', 'type': 'string'}], 'example_questions': []}, 'dim_rate_code': {'description': 'Dim Rate Code — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'rate_code_id', 'type': 'int32'}, {'name': 'description', 'type': 'string'}], 'example_questions': []}, 'dim_vendor': {'description': 'Dim Vendor — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'vendor_id', 'type': 'int32'}, {'name': 'vendor_name', 'type': 'string'}], 'example_questions': []}, 'dim_zone': {'description': 'Dim Zone — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'borough', 'type': 'string'}, {'name': 'zone', 'type': 'string'}, {'name': 'service_zone', 'type': 'string'}], 'example_questions': []}, 'dim_zone_grouped': {'description': 'Dim Zone Grouped — auto-generated, update manually', 'tier': 'dim', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'service_zone', 'type': 'string'}, {'name': 'pickup_trip_count', 'type': 'int64'}, {'name': 'trip_volume_tier', 'type': 'string'}, {'name': 'group_name', 'type': 'string'}], 'example_questions': []}, 'dq_batch_metadata': {'description': 'Dq Batch Metadata — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'script_name', 'type': 'string'}, {'name': 'export_timestamp', 'type': 'timestamp[ns]'}, {'name': 'export_date', 'type': 'date32[day]'}, {'name': 'fact_trips_row_count', 'type': 'int64'}, {'name': 'dataset_count', 'type': 'int32'}], 'example_questions': []}, 'dq_row_count_trend': {'description': 'Dq Row Count Trend — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'delta_from_7day_avg', 'type': 'double'}, {'name': 'anomaly_flag', 'type': 'string'}], 'example_questions': []}, 'dq_validation_summary': {'description': 'Dq Validation Summary — auto-generated, update manually', 'tier': 'dq', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'total_trips', 'type': 'int64'}, {'name': 'zero_distance', 'type': 'int64'}, {'name': 'negative_fare', 'type': 'int64'}, {'name': 'invalid_passengers', 'type': 'int64'}, {'name': 'negative_tip', 'type': 'int64'}, {'name': 'total_less_than_fare', 'type': 'int64'}], 'example_questions': []}, 'fact_trips_borough': {'description': 'Fact Trips Borough — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}], 'example_questions': []}, 'fact_trips_daily': {'description': 'Fact Trips Daily — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'total_passengers', 'type': 'int64'}], 'example_questions': []}, 'fact_trips_hourly': {'description': 'Hourly trip counts and fares aggregated across all zones', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': ['which hour has the most trips', 'peak hour revenue']}, 'fact_trips_hourly_zone': {'description': 'Fact Trips Hourly Zone — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'dropoff_count', 'type': 'int64'}], 'example_questions': []}, 'kpi_borough_comparison': {'description': 'Revenue and trip counts broken down by NYC borough', 'tier': 'kpi', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'market_share_pct', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': ['revenue by borough', 'which borough has most trips']}, 'kpi_daily_overview': {'description': 'Daily revenue, trips, and AOV for recent days', 'tier': 'kpi', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'unique_vendors', 'type': 'int64'}, {'name': 'utilization_rate', 'type': 'decimal128(23, 1)'}], 'example_questions': ['daily overview', 'recent days summary']}, 'kpi_monthly_summary': {'description': 'Monthly aggregated revenue, trips, and AOV across all zones', 'tier': 'kpi', 'columns': [{'name': 'pickup_year', 'type': 'int32'}, {'name': 'pickup_month', 'type': 'int32'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_trip_per_day', 'type': 'decimal128(22, 1)'}, {'name': 'prev_month_revenue', 'type': 'double'}, {'name': 'mom_growth_pct', 'type': 'double'}], 'example_questions': ['show monthly revenue trend', 'which month had the most trips']}, 'kpi_payment_trends': {'description': 'Payment type breakdown (cash, card, etc.) by period', 'tier': 'kpi', 'columns': [{'name': 'payment_type', 'type': 'int32'}, {'name': 'payment_desc', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}], 'example_questions': ['payment type breakdown', 'how do passengers pay']}, 'kpi_vendor_performance': {'description': 'Trip count and revenue by taxi vendor', 'tier': 'kpi', 'columns': [{'name': 'vendor_id', 'type': 'int32'}, {'name': 'vendor_name', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'market_share_pct', 'type': 'decimal128(24, 1)'}], 'example_questions': ['vendor performance', 'which vendor has most trips']}, 'kpi_weekly_trends': {'description': 'Weekly revenue, trip count, and AOV trends', 'tier': 'kpi', 'columns': [{'name': 'year', 'type': 'int64'}, {'name': 'week', 'type': 'int64'}, {'name': 'week_start', 'type': 'date32[day]'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'prev_week_trips', 'type': 'int64'}, {'name': 'trip_growth_pct', 'type': 'decimal128(23, 1)'}, {'name': 'revenue_growth_pct', 'type': 'double'}], 'example_questions': ['show weekly trip count', 'weekly revenue trend']}, 'kpi_zone_net_flow': {'description': 'Kpi Zone Net Flow — auto-generated, update manually', 'tier': 'kpi', 'columns': [{'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'pickups', 'type': 'int64'}, {'name': 'dropoffs', 'type': 'int64'}, {'name': 'net_flow', 'type': 'int64'}, {'name': 'net_flow_ratio', 'type': 'decimal128(22, 1)'}, {'name': 'imbalance_score', 'type': 'decimal128(22, 1)'}, {'name': 'primary_inflow_source', 'type': 'string'}, {'name': 'primary_outflow_dest', 'type': 'string'}, {'name': 'pickup_revenue', 'type': 'double'}, {'name': 'dropoff_revenue', 'type': 'double'}], 'example_questions': []}, 'kpi_zone_performance': {'description': 'Revenue, trips, and AOV per zone', 'tier': 'kpi', 'columns': [{'name': 'location_id', 'type': 'int32'}, {'name': 'zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'pickups', 'type': 'int64'}, {'name': 'dropoffs', 'type': 'int64'}, {'name': 'net_flow', 'type': 'int64'}, {'name': 'net_flow_ratio', 'type': 'decimal128(22, 1)'}, {'name': 'pickup_revenue', 'type': 'double'}, {'name': 'dropoff_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}, {'name': 'airport_trip_count', 'type': 'int64'}, {'name': 'airport_trip_pct', 'type': 'decimal128(24, 1)'}], 'example_questions': ['zone performance by revenue', 'top zones by fare']}, 'od_borough_matrix': {'description': 'Od Borough Matrix — auto-generated, update manually', 'tier': 'fact', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'total_revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'pct_of_total', 'type': 'decimal128(24, 1)'}], 'example_questions': []}, 'ops_passenger_count_pattern': {'description': 'Ops Passenger Count Pattern — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'passenger_count', 'type': 'int32'}, {'name': 'pickup_hour', 'type': 'int64'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}], 'example_questions': []}, 'ops_peak_hours_heatmap': {'description': 'Trip count by hour-of-day and day-of-week for heatmap display', 'tier': 'ops', 'columns': [{'name': 'pickup_hour', 'type': 'int64'}, {'name': 'day_of_week', 'type': 'int64'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}], 'example_questions': ['show peak hour heatmap', 'busy hours by day']}, 'ops_trip_distance_distribution': {'description': 'Ops Trip Distance Distribution — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'distance_bucket', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_total', 'type': 'double'}], 'example_questions': []}, 'ops_utilization_rate': {'description': 'Ops Utilization Rate — auto-generated, update manually', 'tier': 'ops', 'columns': [{'name': 'pickup_date', 'type': 'date32[day]'}, {'name': 'total_trips', 'type': 'int64'}, {'name': 'tipped_trips', 'type': 'int64'}, {'name': 'tip_rate_pct', 'type': 'decimal128(24, 1)'}, {'name': 'multi_passenger_trips', 'type': 'int64'}, {'name': 'multi_passenger_pct', 'type': 'decimal128(24, 1)'}, {'name': 'avg_passengers', 'type': 'double'}], 'example_questions': []}, 'route_airport_analysis': {'description': 'Route Airport Analysis — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'direction', 'type': 'string'}, {'name': 'airport', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip_pct', 'type': 'double'}], 'example_questions': []}, 'route_airport_zone_matrix': {'description': 'Route Airport Zone Matrix — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'airport_zone', 'type': 'string'}, {'name': 'residential_zone', 'type': 'string'}, {'name': 'borough', 'type': 'string'}, {'name': 'trips', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'peak_hour', 'type': 'int32'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': []}, 'route_cross_borough': {'description': 'Route Cross Borough — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': []}, 'route_popular_routes': {'description': 'Most frequent pickup-to-dropoff zone pairs by trip count', 'tier': 'route', 'columns': [{'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'dropoff_zone', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_revenue', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}, {'name': 'avg_tip', 'type': 'double'}], 'example_questions': ['most popular routes', 'top pickup to dropoff zones']}, 'route_top_dropoff_zones': {'description': 'Route Top Dropoff Zones — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'dropoff_zone', 'type': 'string'}, {'name': 'dropoff_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': []}, 'route_top_pickup_zones': {'description': 'Route Top Pickup Zones — auto-generated, update manually', 'tier': 'route', 'columns': [{'name': 'pickup_zone', 'type': 'string'}, {'name': 'pickup_borough', 'type': 'string'}, {'name': 'trip_count', 'type': 'int64'}, {'name': 'revenue', 'type': 'double'}, {'name': 'avg_fare', 'type': 'double'}, {'name': 'avg_distance', 'type': 'double'}], 'example_questions': []}}
+# ---------------------------------------------------------------------------
+# Schema registry — S3-backed with TTL cache
+# ---------------------------------------------------------------------------
+
+_registry_cache: dict | None = None
+_registry_ts: float = 0.0
+
+
+def _fetch_registry_from_s3(s3_bucket: str, aws_region: str) -> dict:
+    """Fetch schema_registry.json from S3 using IRSA web identity or credential chain.
+
+    Reuses the same STS web identity exchange pattern as _create_s3_secret so
+    no additional credentials are needed in the pod.
+    """
+    role_arn = os.getenv("AWS_ROLE_ARN")
+    token_file = os.getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+
+    headers: dict = {}
+    if role_arn and token_file:
+        with open(token_file, "r", encoding="utf-8") as f:
+            web_identity_token = f.read()
+        body = urllib.parse.urlencode(
+            {
+                "Action": "AssumeRoleWithWebIdentity",
+                "Version": "2011-06-15",
+                "RoleArn": role_arn,
+                "RoleSessionName": "openwebui-registry-fetch",
+                "WebIdentityToken": web_identity_token,
+            }
+        ).encode()
+        req = urllib.request.Request(
+            f"https://sts.{aws_region}.amazonaws.com/",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        root = ET.fromstring(resp.read())
+        ns = {"sts": "https://sts.amazonaws.com/doc/2011-06-15/"}
+        access_key = root.findtext(".//sts:Credentials/sts:AccessKeyId", namespaces=ns)
+        secret_key = root.findtext(".//sts:Credentials/sts:SecretAccessKey", namespaces=ns)
+        session_token = root.findtext(".//sts:Credentials/sts:SessionToken", namespaces=ns)
+        if not access_key or not secret_key or not session_token:
+            raise RuntimeError("STS AssumeRoleWithWebIdentity did not return complete credentials")
+
+        # Build a minimal AWS Signature V4 signed request for S3 GET.
+        # For simplicity in a controlled EKS environment, presign via query params
+        # is complex; instead use the temporary credentials with httpx (already a dep).
+        headers = {
+            "x-amz-security-token": session_token,
+        }
+        import hmac
+        import hashlib as _hl
+        import datetime
+
+        now = datetime.datetime.utcnow()
+        datestamp = now.strftime("%Y%m%d")
+        amzdate = now.strftime("%Y%m%dT%H%M%SZ")
+        method = "GET"
+        canonical_uri = "/schema_registry.json"
+        canonical_querystring = ""
+        host = f"{s3_bucket}.s3.{aws_region}.amazonaws.com"
+        canonical_headers = (
+            f"host:{host}\n"
+            f"x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+            f"x-amz-date:{amzdate}\n"
+            f"x-amz-security-token:{session_token}\n"
+        )
+        signed_headers = "host;x-amz-content-sha256;x-amz-date;x-amz-security-token"
+        payload_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        canonical_request = "\n".join([
+            method, canonical_uri, canonical_querystring,
+            canonical_headers, signed_headers, payload_hash,
+        ])
+
+        credential_scope = f"{datestamp}/{aws_region}/s3/aws4_request"
+        string_to_sign = "\n".join([
+            "AWS4-HMAC-SHA256", amzdate, credential_scope,
+            _hl.sha256(canonical_request.encode()).hexdigest(),
+        ])
+
+        def _sign(key, msg):
+            return hmac.new(key, msg.encode(), _hl.sha256).digest()
+
+        signing_key = _sign(
+            _sign(
+                _sign(
+                    _sign(f"AWS4{secret_key}".encode(), datestamp),
+                    aws_region,
+                ),
+                "s3",
+            ),
+            "aws4_request",
+        )
+        signature = hmac.new(signing_key, string_to_sign.encode(), _hl.sha256).hexdigest()
+        auth_header = (
+            f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        )
+        url = f"https://{host}{canonical_uri}"
+        req2 = urllib.request.Request(url, headers={
+            "Authorization": auth_header,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amzdate,
+            "x-amz-security-token": session_token,
+        })
+        resp2 = urllib.request.urlopen(req2, timeout=10)
+        return json.loads(resp2.read().decode("utf-8"))
+
+    # No IRSA — fall back to unsigned request (works with IAM instance profile /
+    # credential chain if the bucket policy allows).
+    url = f"https://{s3_bucket}.s3.{aws_region}.amazonaws.com/schema_registry.json"
+    req3 = urllib.request.Request(url)
+    resp3 = urllib.request.urlopen(req3, timeout=10)
+    return json.loads(resp3.read().decode("utf-8"))
+
+
+def _load_registry(s3_bucket: str, aws_region: str, ttl: int = 300) -> dict:
+    """Return the schema registry, fetching from S3 when the TTL has expired.
+
+    Falls back to stale cache on S3 errors. Raises on first-call failure.
+    """
+    global _registry_cache, _registry_ts
+
+    now = time.time()
+    if _registry_cache is not None and (now - _registry_ts) < ttl:
+        return _registry_cache
+
+    try:
+        data = _fetch_registry_from_s3(s3_bucket, aws_region)
+        _registry_cache = data
+        _registry_ts = now
+        return _registry_cache
+    except Exception:
+        if _registry_cache is not None:
+            # Return stale data rather than blowing up
+            return _registry_cache
+        raise
+
+
 
 
 _SUPERVISOR_SYSTEM = """You are a table selection agent for NYC yellow cab trip analytics.
@@ -312,14 +513,25 @@ def _registry_as_prompt(registry: dict) -> str:
     return "\n".join(lines)
 
 
-def _run_supervisor(question: str, registry: dict, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
+def _run_supervisor(
+    question: str,
+    registry: dict,
+    litellm_url: str = LITELLM_URL,
+    litellm_model: str = LITELLM_MODEL,
+    api_key: str = "",
+) -> dict:
     """Returns {"table": str, "confidence": "high|low", "reasoning": str}."""
     registry_text = _registry_as_prompt(registry)
     messages = [
         {"role": "system", "content": _SUPERVISOR_SYSTEM},
-        {"role": "user", "content": f"Available tables:\n{registry_text}\n\nQuestion: {question}"},
+        {
+            "role": "user",
+            "content": f"Available tables:\n{registry_text}\n\nQuestion: {question}",
+        },
     ]
-    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
+    raw = _llm_chat(
+        messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
+    )
     cleaned = _strip_fences(raw)
     parsed = json.loads(cleaned.strip())
     table = parsed.get("table", "")
@@ -328,7 +540,11 @@ def _run_supervisor(question: str, registry: dict, litellm_url: str = LITELLM_UR
     confidence = parsed.get("confidence", "low")
     if confidence not in ("high", "low"):
         confidence = "low"
-    return {"table": table, "confidence": confidence, "reasoning": parsed.get("reasoning", "")}
+    return {
+        "table": table,
+        "confidence": confidence,
+        "reasoning": parsed.get("reasoning", ""),
+    }
 
 
 S3_BUCKET = "llmops-analytics-492372116094"
@@ -355,13 +571,15 @@ def _create_s3_secret(conn, aws_region: str) -> str:
         with open(token_file, "r", encoding="utf-8") as f:
             web_identity_token = f.read()
 
-        body = urllib.parse.urlencode({
-            "Action": "AssumeRoleWithWebIdentity",
-            "Version": "2011-06-15",
-            "RoleArn": role_arn,
-            "RoleSessionName": "openwebui-duckdb-analytics",
-            "WebIdentityToken": web_identity_token,
-        }).encode()
+        body = urllib.parse.urlencode(
+            {
+                "Action": "AssumeRoleWithWebIdentity",
+                "Version": "2011-06-15",
+                "RoleArn": role_arn,
+                "RoleSessionName": "openwebui-duckdb-analytics",
+                "WebIdentityToken": web_identity_token,
+            }
+        ).encode()
         req = urllib.request.Request(
             f"https://sts.{aws_region}.amazonaws.com/",
             data=body,
@@ -371,10 +589,16 @@ def _create_s3_secret(conn, aws_region: str) -> str:
         root = ET.fromstring(resp.read())
         ns = {"sts": "https://sts.amazonaws.com/doc/2011-06-15/"}
         access_key = root.findtext(".//sts:Credentials/sts:AccessKeyId", namespaces=ns)
-        secret_key = root.findtext(".//sts:Credentials/sts:SecretAccessKey", namespaces=ns)
-        session_token = root.findtext(".//sts:Credentials/sts:SessionToken", namespaces=ns)
+        secret_key = root.findtext(
+            ".//sts:Credentials/sts:SecretAccessKey", namespaces=ns
+        )
+        session_token = root.findtext(
+            ".//sts:Credentials/sts:SessionToken", namespaces=ns
+        )
         if not access_key or not secret_key or not session_token:
-            raise RuntimeError("STS AssumeRoleWithWebIdentity did not return complete credentials")
+            raise RuntimeError(
+                "STS AssumeRoleWithWebIdentity did not return complete credentials"
+            )
 
         conn.execute(f"""
             CREATE OR REPLACE SECRET _s3 (
@@ -397,6 +621,7 @@ def _create_s3_secret(conn, aws_region: str) -> str:
     """)
     return "credential_chain"
 
+
 _QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics stored in Parquet files on S3.
 Rules:
 - Write ONE SELECT statement only
@@ -408,7 +633,16 @@ Rules:
 - Do not use read_parquet(), httpfs, or any file functions"""
 
 
-def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_region: str = AWS_REGION, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
+def _run_query(
+    question: str,
+    table: str,
+    registry: dict,
+    s3_bucket: str,
+    aws_region: str = AWS_REGION,
+    litellm_url: str = LITELLM_URL,
+    litellm_model: str = LITELLM_MODEL,
+    api_key: str = "",
+) -> dict:
     """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
@@ -418,9 +652,14 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
     messages = [
         {"role": "system", "content": _QUERY_SYSTEM},
-        {"role": "user", "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}"},
+        {
+            "role": "user",
+            "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}",
+        },
     ]
-    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
+    raw = _llm_chat(
+        messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
+    )
     sql = _strip_fences(raw).rstrip(";").strip()
     _validate_sql(sql, table, set(registry.keys()))
 
@@ -429,12 +668,12 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     # and skip the outer cap, letting DuckDB materialise unbounded rows.
     # Walk at depth=0 only to detect a true top-level LIMIT.
     _depth, _top_limit = 0, False
-    for _tok in re.split(r'(\(|\))', sql):
-        if _tok == '(':
+    for _tok in re.split(r"(\(|\))", sql):
+        if _tok == "(":
             _depth += 1
-        elif _tok == ')':
+        elif _tok == ")":
             _depth -= 1
-        elif _depth == 0 and re.search(r'\bLIMIT\s+\d+', _tok, re.IGNORECASE):
+        elif _depth == 0 and re.search(r"\bLIMIT\s+\d+", _tok, re.IGNORECASE):
             _top_limit = True
             break
     if not _top_limit:
@@ -446,12 +685,19 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     import duckdb
 
     def _execute():
-        conn = duckdb.connect(config={"memory_limit": "512MB", "extension_directory": "/tmp/duckdb-extensions"})
+        conn = duckdb.connect(
+            config={
+                "memory_limit": "512MB",
+                "extension_directory": "/tmp/duckdb-extensions",
+            }
+        )
         try:
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
             auth_mode = _create_s3_secret(conn, aws_region)
-            print(f"DuckDB S3 auth mode: {auth_mode}; path: s3://{s3_bucket}/{table}/*.parquet")
+            print(
+                f"DuckDB S3 auth mode: {auth_mode}; path: s3://{s3_bucket}/{table}/*.parquet"
+            )
             conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
             return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
         finally:
@@ -481,20 +727,34 @@ Rules:
 - No markdown, no explanation outside the JSON"""
 
 
-def _run_summarize(question: str, rows: list[dict], capped: bool, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> dict:
+def _run_summarize(
+    question: str,
+    rows: list[dict],
+    capped: bool,
+    litellm_url: str = LITELLM_URL,
+    litellm_model: str = LITELLM_MODEL,
+    api_key: str = "",
+) -> dict:
     """Returns {"summary": str, "chart_spec": dict|None}."""
     rows_json = json.dumps(rows[:50], default=str)
     if capped:
-        cap_note = f" NOTE: results were capped at {ROW_CAP} rows; showing first 50 to model."
+        cap_note = (
+            f" NOTE: results were capped at {ROW_CAP} rows; showing first 50 to model."
+        )
     elif len(rows) > 50:
         cap_note = f" NOTE: showing first 50 of {len(rows)} rows to model."
     else:
         cap_note = ""
     messages = [
         {"role": "system", "content": _SUMMARIZE_SYSTEM},
-        {"role": "user", "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}"},
+        {
+            "role": "user",
+            "content": f"Question: {question}{cap_note}\n\nRows:\n{rows_json}",
+        },
     ]
-    raw = _llm_chat(messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key)
+    raw = _llm_chat(
+        messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
+    )
     parsed = json.loads(_strip_fences(raw).strip())
     summary = parsed.get("summary", "").strip()
     chart_spec = parsed.get("chart_spec")
@@ -502,9 +762,11 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, litellm_url: s
     # Validate chart_spec columns against actual row keys
     if chart_spec and rows:
         col_names = set(rows[0].keys())
-        if (chart_spec.get("x") not in col_names or
-                chart_spec.get("y") not in col_names or
-                chart_spec.get("type") not in {"bar", "line", "pie", "table"}):
+        if (
+            chart_spec.get("x") not in col_names
+            or chart_spec.get("y") not in col_names
+            or chart_spec.get("type") not in {"bar", "line", "pie", "table"}
+        ):
             chart_spec = None
 
     return {"summary": summary, "chart_spec": chart_spec}
@@ -513,12 +775,16 @@ def _run_summarize(question: str, rows: list[dict], capped: bool, litellm_url: s
 class Pipe:
     class Valves(BaseModel):
         """Open WebUI admin-configurable settings for this pipe."""
+
         s3_bucket: str = S3_BUCKET
         aws_region: str = AWS_REGION
         litellm_url: str = LITELLM_URL
         litellm_model: str = LITELLM_MODEL
         litellm_api_key: str = ""
         enabled: bool = True
+        registry_ttl: int = 300
+        duckdb_timeout: int = DUCKDB_TIMEOUT
+        row_cap: int = ROW_CAP
 
     def __init__(self):
         self.valves = self.Valves()
@@ -541,7 +807,12 @@ class Pipe:
         user_messages = [m for m in messages if m.get("role") == "user"]
         if not user_messages:
             try:
-                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
+                return await _stream_llm(
+                    messages,
+                    self.valves.litellm_url,
+                    self.valves.litellm_model,
+                    self.valves.litellm_api_key,
+                )
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -549,7 +820,12 @@ class Pipe:
         question = user_messages[-1].get("content", "").strip()
         if not question:
             try:
-                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
+                return await _stream_llm(
+                    messages,
+                    self.valves.litellm_url,
+                    self.valves.litellm_model,
+                    self.valves.litellm_api_key,
+                )
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -558,7 +834,12 @@ class Pipe:
 
         if intent == INTENT_CHAT:
             try:
-                return await _stream_llm(messages, self.valves.litellm_url, self.valves.litellm_model, self.valves.litellm_api_key)
+                return await _stream_llm(
+                    messages,
+                    self.valves.litellm_url,
+                    self.valves.litellm_model,
+                    self.valves.litellm_api_key,
+                )
             except Exception as e:
                 traceback.print_exc()
                 return f"Chat service error: {e}"
@@ -573,7 +854,12 @@ class Pipe:
         # INTENT_ANALYTICS
         try:
             if __event_emitter__:
-                await __event_emitter__({"type": "status", "data": {"description": "Analyzing", "done": False}})
+                await __event_emitter__(
+                    {
+                        "type": "status",
+                        "data": {"description": "Analyzing", "done": False},
+                    }
+                )
 
             result = _run_analytics(
                 question,
@@ -584,44 +870,85 @@ class Pipe:
                 self.valves.litellm_api_key,
             )
 
-            if __event_emitter__:
-                await __event_emitter__({"type": "status", "data": {"description": "Analyzing", "done": True}})
+            if __event_emitter__ and result.get("html"):
+                await __event_emitter__(
+                    {
+                        "type": "embeds",
+                        "data": {"embeds": [result["html"]]},
+                    }
+                )
 
-            return result
+            if __event_emitter__:
+                await __event_emitter__(
+                    {
+                        "type": "status",
+                        "data": {"description": "Analyzing", "done": True},
+                    }
+                )
+
+            return result["text"]
         except Exception as e:
             traceback.print_exc()
             if __event_emitter__:
-                await __event_emitter__({"type": "status", "data": {"description": "Analyzing", "done": True}})
+                await __event_emitter__(
+                    {
+                        "type": "status",
+                        "data": {"description": "Analyzing", "done": True},
+                    }
+                )
             return f"Analytics pipeline error: {e}"
 
 
-def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, litellm_url: str = LITELLM_URL, litellm_model: str = LITELLM_MODEL, api_key: str = "") -> str:
-    """Run full supervisor → query → summarize pipeline, return formatted response."""
-    supervisor = _run_supervisor(question, REGISTRY, litellm_url, litellm_model, api_key)
+def _run_analytics(
+    question: str,
+    s3_bucket: str,
+    aws_region: str = AWS_REGION,
+    litellm_url: str = LITELLM_URL,
+    litellm_model: str = LITELLM_MODEL,
+    api_key: str = "",
+    registry_ttl: int = 300,
+) -> dict:
+    """Run full supervisor → query → summarize pipeline, return {text, html}."""
+    registry = _load_registry(s3_bucket, aws_region, ttl=registry_ttl)
+    supervisor = _run_supervisor(
+        question, registry, litellm_url, litellm_model, api_key
+    )
 
     if supervisor["confidence"] == "low":
-        return (
-            "I wasn't confident which data to use for that question. "
-            f"Could you be more specific? ({supervisor['reasoning']})"
-        )
+        return {
+            "text": (
+                "I wasn't confident which data to use for that question. "
+                f"Could you be more specific? ({supervisor['reasoning']})"
+            ),
+            "html": None,
+        }
 
     table = supervisor["table"]
 
-    query_result = _run_query(question, table, REGISTRY, s3_bucket, aws_region, litellm_url, litellm_model, api_key)
+    query_result = _run_query(
+        question,
+        table,
+        registry,
+        s3_bucket,
+        aws_region,
+        litellm_url,
+        litellm_model,
+        api_key,
+    )
     rows = query_result["rows"]
     capped = query_result["capped"]
 
     if not rows:
-        return "No data found for that query."
+        return {"text": "No data found for that query.", "html": None}
 
-    summarize_result = _run_summarize(question, rows, capped, litellm_url, litellm_model, api_key)
+    summarize_result = _run_summarize(
+        question, rows, capped, litellm_url, litellm_model, api_key
+    )
     summary = summarize_result["summary"]
     chart_spec = summarize_result["chart_spec"]
 
-    parts = [summary]
+    html = None
     if chart_spec:
         html = build_html_artifact(chart_spec, rows)
-        if html:
-            parts.append(_persist_html_artifact(html))
 
-    return "\n\n".join(parts)
+    return {"text": summary, "html": html}
