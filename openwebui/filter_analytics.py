@@ -187,7 +187,7 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
         return None
 
     vl_spec = chart_spec_to_vegalite(chart_spec, rows)
-    spec_json = json.dumps(vl_spec)
+    spec_json = json.dumps(vl_spec, default=str)
     spec_json = spec_json.replace("</", "<\\/")
 
     return f"""<!DOCTYPE html>
@@ -891,12 +891,14 @@ async def _stream_analytics(
 
     if emitter:
         await emitter({"type": "status", "data": {"description": "Preparing chart...", "done": False}})
-    chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
-    if chart_spec:
-        html = build_html_artifact(chart_spec, rows)
-        if html and emitter:
-            await emitter({"type": "embeds", "data": {"embeds": [html]}})
-
+    try:
+        chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
+        if chart_spec:
+            html = build_html_artifact(chart_spec, rows)
+            if html and emitter:
+                await emitter({"type": "embeds", "data": {"embeds": [html]}})
+    except Exception:
+        pass
     if emitter:
         await emitter({"type": "status", "data": {"description": "Summarizing...", "done": False}})
     yield "---\n\n"
