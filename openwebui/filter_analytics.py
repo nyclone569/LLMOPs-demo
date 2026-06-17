@@ -14,8 +14,12 @@ from starlette.responses import StreamingResponse
 from typing import Optional
 import httpx
 import json
+import os
 import re
 import traceback
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
 DOMAIN_TERMS = {
     "taxi", "trip", "trips", "fare", "borough", "zone", "pickup", "dropoff",
@@ -251,6 +255,67 @@ AWS_REGION = "ap-southeast-1"
 ROW_CAP = 200
 DUCKDB_TIMEOUT = 30
 
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _create_s3_secret(conn, aws_region: str) -> str:
+    """Create DuckDB S3 credentials, preferring EKS IRSA web identity when present.
+
+    DuckDB 1.2.2 accepts PROVIDER CREDENTIAL_CHAIN, but in Open WebUI it does
+    not resolve AWS_WEB_IDENTITY_TOKEN_FILE into usable S3 credentials. The AWS
+    SDK STS flow works in the same pod, so exchange the token explicitly and pass
+    the temporary credentials to DuckDB without logging them.
+    """
+    role_arn = os.getenv("AWS_ROLE_ARN")
+    token_file = os.getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+    if role_arn and token_file:
+        with open(token_file, "r", encoding="utf-8") as f:
+            web_identity_token = f.read()
+
+        body = urllib.parse.urlencode({
+            "Action": "AssumeRoleWithWebIdentity",
+            "Version": "2011-06-15",
+            "RoleArn": role_arn,
+            "RoleSessionName": "openwebui-duckdb-analytics",
+            "WebIdentityToken": web_identity_token,
+        }).encode()
+        req = urllib.request.Request(
+            f"https://sts.{aws_region}.amazonaws.com/",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        root = ET.fromstring(resp.read())
+        ns = {"sts": "https://sts.amazonaws.com/doc/2011-06-15/"}
+        access_key = root.findtext(".//sts:Credentials/sts:AccessKeyId", namespaces=ns)
+        secret_key = root.findtext(".//sts:Credentials/sts:SecretAccessKey", namespaces=ns)
+        session_token = root.findtext(".//sts:Credentials/sts:SessionToken", namespaces=ns)
+        if not access_key or not secret_key or not session_token:
+            raise RuntimeError("STS AssumeRoleWithWebIdentity did not return complete credentials")
+
+        conn.execute(f"""
+            CREATE OR REPLACE SECRET _s3 (
+                TYPE S3,
+                PROVIDER CONFIG,
+                KEY_ID {_sql_literal(access_key)},
+                SECRET {_sql_literal(secret_key)},
+                SESSION_TOKEN {_sql_literal(session_token)},
+                REGION {_sql_literal(aws_region)}
+            )
+        """)
+        return "web_identity"
+
+    conn.execute(f"""
+        CREATE OR REPLACE SECRET _s3 (
+            TYPE S3,
+            PROVIDER CREDENTIAL_CHAIN,
+            REGION {_sql_literal(aws_region)}
+        )
+    """)
+    return "credential_chain"
+
 _QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics stored in Parquet files on S3.
 Rules:
 - Write ONE SELECT statement only
@@ -304,13 +369,8 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         try:
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
-            conn.execute(f"""
-                CREATE OR REPLACE SECRET _s3 (
-                    TYPE S3,
-                    PROVIDER CREDENTIAL_CHAIN,
-                    REGION '{aws_region}'
-                )
-            """)
+            auth_mode = _create_s3_secret(conn, aws_region)
+            print(f"DuckDB S3 auth mode: {auth_mode}; path: s3://{s3_bucket}/{table}/*.parquet")
             conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
             return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
         finally:

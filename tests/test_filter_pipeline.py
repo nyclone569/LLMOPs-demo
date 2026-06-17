@@ -1,10 +1,31 @@
 import pytest
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, mock_open
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
 from filter_analytics import _strip_fences, _validate_sql, SQLValidationError
+
+
+class _FakeHTTPResponse:
+    def read(self):
+        return b"""<AssumeRoleWithWebIdentityResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\">
+  <AssumeRoleWithWebIdentityResult>
+    <Credentials>
+      <AccessKeyId>ASIAEXAMPLE</AccessKeyId>
+      <SecretAccessKey>secret/example</SecretAccessKey>
+      <SessionToken>token/example</SessionToken>
+    </Credentials>
+  </AssumeRoleWithWebIdentityResult>
+</AssumeRoleWithWebIdentityResponse>"""
+
+
+class _FakeConn:
+    def __init__(self):
+        self.sql = []
+
+    def execute(self, sql):
+        self.sql.append(sql)
 
 
 def test_strip_fences_removes_sql_block():
@@ -54,6 +75,40 @@ def test_validate_sql_allows_cte():
         "kpi_monthly_summary",
         {"kpi_monthly_summary"},
     )
+
+
+def test_create_s3_secret_uses_web_identity_when_irsa_env_present():
+    from filter_analytics import _create_s3_secret
+
+    conn = _FakeConn()
+    env = {
+        "AWS_ROLE_ARN": "arn:aws:iam::492372116094:role/llmops-cluster-analytics-open-webui",
+        "AWS_WEB_IDENTITY_TOKEN_FILE": "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+    }
+
+    with patch.dict("os.environ", env, clear=True), \
+         patch("builtins.open", mock_open(read_data="jwt-token")), \
+         patch("urllib.request.urlopen", return_value=_FakeHTTPResponse()):
+        auth_mode = _create_s3_secret(conn, "ap-southeast-1")
+
+    assert auth_mode == "web_identity"
+    sql = conn.sql[0]
+    assert "PROVIDER CONFIG" in sql
+    assert "KEY_ID 'ASIAEXAMPLE'" in sql
+    assert "SESSION_TOKEN 'token/example'" in sql
+
+
+def test_create_s3_secret_uses_credential_chain_without_irsa_env():
+    from filter_analytics import _create_s3_secret
+
+    conn = _FakeConn()
+
+    with patch.dict("os.environ", {}, clear=True):
+        auth_mode = _create_s3_secret(conn, "ap-southeast-1")
+
+    assert auth_mode == "credential_chain"
+    assert "PROVIDER CREDENTIAL_CHAIN" in conn.sql[0]
+    assert "REGION 'ap-southeast-1'" in conn.sql[0]
 
 
 @pytest.mark.asyncio
