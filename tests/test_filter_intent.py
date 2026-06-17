@@ -114,11 +114,44 @@ def test_html_artifact_pie_renders_as_horizontal_bar():
     assert '"mark": "bar"' in html
 
 
-def test_no_html_when_chart_type_is_table():
+def test_chart_type_table_builds_table_artifact():
     chart_spec = {"type": "table", "x": "month", "y": "revenue", "series": []}
     rows = [{"month": "Jan", "revenue": 1000}]
     result = build_html_artifact(chart_spec, rows)
-    assert result is None
+
+    assert result is not None
+    assert "<!DOCTYPE html>" in result
+    assert "Query result table" in result
+    assert "data-analytics-table" in result
+    assert "Download" not in result
+
+
+def test_table_artifact_escapes_values_and_embeds_rows_json():
+    from filter_analytics import build_table_artifact
+
+    rows = [{"zone": "<script>alert(1)</script>", "revenue": 12.5}]
+    html = build_table_artifact(rows, {"row_cap": 200, "capped": False})
+
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert '<script type="application/json" id="table-data">' in html
+    assert '"revenue": 12.5' in html
+
+
+def test_table_artifact_has_search_sort_pagination_and_no_export():
+    from filter_analytics import build_table_artifact
+
+    rows = [{"month": "Jan", "revenue": 1000}]
+    html = build_table_artifact(rows, {"row_cap": 200, "capped": True})
+
+    assert 'id="global-search"' in html
+    assert 'id="page-size"' in html
+    assert 'id="prev-page"' in html
+    assert 'id="next-page"' in html
+    assert "sortState" in html
+    assert "Showing first 200 rows" in html
+    assert "CSV" not in html
+    assert "download" not in html.lower()
 
 
 def test_chart_spec_to_vegalite_bar():

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 from typing import Optional
 from pathlib import Path
+import html as html_lib
 import hashlib
 import httpx
 import json
@@ -222,13 +223,347 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
             )
 
 
-def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
-    """Wrap a Vega-Lite spec in a self-contained HTML artifact string.
+def _infer_table_columns(rows: list[dict]) -> list[dict]:
+    """Infer stable table columns from returned row keys."""
+    if not rows:
+        return []
 
-    Returns None for table type (text-only result).
-    """
+    keys: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in keys:
+                keys.append(key)
+
+    columns = []
+    for key in keys:
+        sample = next((row.get(key) for row in rows if row.get(key) is not None), None)
+        if isinstance(sample, bool):
+            col_type = "boolean"
+        elif isinstance(sample, (int, float)):
+            col_type = "number"
+        else:
+            col_type = "string"
+        columns.append({"key": key, "label": key, "type": col_type})
+    return columns
+
+
+def build_table_artifact(rows: list[dict], metadata: dict | None = None) -> str:
+    """Build a self-contained, view-only HTML table artifact."""
+    metadata = metadata or {}
+    columns = _infer_table_columns(rows)
+    safe_rows_json = json.dumps(rows, default=str).replace("</", "<\\/")
+    safe_columns_json = json.dumps(columns, default=str).replace("</", "<\\/")
+    row_cap = int(metadata.get("row_cap", ROW_CAP))
+    capped = bool(metadata.get("capped", False))
+    data_as_of = metadata.get("data_as_of")
+    capped_label = f"Showing first {row_cap} rows" if capped else ""
+    data_as_of_label = f"Data as of {data_as_of}" if data_as_of else ""
+
+    escaped_capped_label = html_lib.escape(capped_label)
+    escaped_data_as_of_label = html_lib.escape(data_as_of_label)
+    preview_rows = rows[:25]
+    preview_cells = []
+    for row in preview_rows:
+        preview_cells.append("<tr>")
+        for column in columns:
+            css_class = ' class="number"' if column["type"] == "number" else ""
+            cell_value = row.get(column["key"])
+            value = html_lib.escape("" if cell_value is None else str(cell_value))
+            preview_cells.append(f'<td{css_class} title="{value}">{value}</td>')
+        preview_cells.append("</tr>")
+    escaped_preview_rows = "".join(preview_cells)
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {{
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    body {{
+      margin: 0;
+      padding: 12px;
+      background: transparent;
+      color: #111827;
+      font-size: 13px;
+    }}
+    .shell {{
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }}
+    .toolbar {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #f9fafb;
+      flex-wrap: wrap;
+    }}
+    .title {{
+      font-weight: 650;
+      color: #111827;
+    }}
+    .meta {{
+      color: #4b5563;
+      font-size: 12px;
+    }}
+    .controls {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    input, select, button {{
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #111827;
+      font: inherit;
+      min-height: 30px;
+    }}
+    input {{
+      padding: 4px 8px;
+      width: 220px;
+    }}
+    select, button {{
+      padding: 4px 8px;
+    }}
+    button:disabled {{
+      opacity: 0.45;
+      cursor: not-allowed;
+    }}
+    .table-wrap {{
+      max-height: 520px;
+      overflow: auto;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 640px;
+    }}
+    th, td {{
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }}
+    th {{
+      position: sticky;
+      top: 0;
+      background: #f3f4f6;
+      z-index: 1;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 650;
+    }}
+    td.number {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }}
+    tbody tr:nth-child(even) {{
+      background: #f9fafb;
+    }}
+    .footer {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-top: 1px solid #e5e7eb;
+      background: #f9fafb;
+      flex-wrap: wrap;
+    }}
+    .empty {{
+      padding: 28px 12px;
+      text-align: center;
+      color: #6b7280;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ color: #e5e7eb; }}
+      .shell {{ background: #111827; border-color: #374151; }}
+      .toolbar, .footer, th {{ background: #1f2937; border-color: #374151; }}
+      .title {{ color: #f9fafb; }}
+      .meta {{ color: #d1d5db; }}
+      input, select, button {{ background: #111827; color: #e5e7eb; border-color: #4b5563; }}
+      th, td {{ border-color: #374151; }}
+      tbody tr:nth-child(even) {{ background: #172033; }}
+      .empty {{ color: #9ca3af; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell" data-analytics-table>
+    <div class="toolbar">
+      <div>
+        <div class="title">Query result table</div>
+        <div class="meta" id="row-count"></div>
+        <div class="meta">{escaped_capped_label}</div>
+        <div class="meta">{escaped_data_as_of_label}</div>
+      </div>
+      <div class="controls">
+        <input id="global-search" type="search" placeholder="Search results" autocomplete="off">
+        <label class="meta" for="page-size">Rows</label>
+        <select id="page-size">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead id="table-head"></thead>
+        <tbody id="table-body">{escaped_preview_rows}</tbody>
+      </table>
+      <div class="empty" id="empty-state" hidden>No rows returned</div>
+    </div>
+    <div class="footer">
+      <span class="meta" id="page-status"></span>
+      <div class="controls">
+        <button id="prev-page" type="button">Previous</button>
+        <button id="next-page" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+  <script type="application/json" id="table-data">{safe_rows_json}</script>
+  <script type="application/json" id="table-columns">{safe_columns_json}</script>
+  <script>
+    const rows = JSON.parse(document.getElementById('table-data').textContent);
+    const columns = JSON.parse(document.getElementById('table-columns').textContent);
+    let filteredRows = rows.slice();
+    let page = 1;
+    let pageSize = 25;
+    let sortState = {{ key: null, direction: 'asc' }};
+
+    const head = document.getElementById('table-head');
+    const body = document.getElementById('table-body');
+    const emptyState = document.getElementById('empty-state');
+    const rowCount = document.getElementById('row-count');
+    const pageStatus = document.getElementById('page-status');
+    const search = document.getElementById('global-search');
+    const pageSizeSelect = document.getElementById('page-size');
+    const prev = document.getElementById('prev-page');
+    const next = document.getElementById('next-page');
+
+    function escapeText(value) {{
+      return String(value ?? '');
+    }}
+
+    function compareValues(a, b, type) {{
+      if (type === 'number') {{
+        const an = Number(a);
+        const bn = Number(b);
+        if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      }}
+      return escapeText(a).localeCompare(escapeText(b), undefined, {{ numeric: true, sensitivity: 'base' }});
+    }}
+
+    function renderHead() {{
+      const tr = document.createElement('tr');
+      columns.forEach((column) => {{
+        const th = document.createElement('th');
+        th.textContent = column.label;
+        th.title = 'Sort by ' + column.label;
+        th.addEventListener('click', () => {{
+          if (sortState.key === column.key) {{
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+          }} else {{
+            sortState = {{ key: column.key, direction: 'asc' }};
+          }}
+          page = 1;
+          render();
+        }});
+        tr.appendChild(th);
+      }});
+      head.replaceChildren(tr);
+    }}
+
+    function applyFilter() {{
+      const query = search.value.trim().toLowerCase();
+      filteredRows = rows.filter((row) => {{
+        if (!query) return true;
+        return columns.some((column) => escapeText(row[column.key]).toLowerCase().includes(query));
+      }});
+      if (sortState.key) {{
+        const column = columns.find((candidate) => candidate.key === sortState.key) || {{ type: 'string' }};
+        filteredRows.sort((a, b) => {{
+          const result = compareValues(a[sortState.key], b[sortState.key], column.type);
+          return sortState.direction === 'asc' ? result : -result;
+        }});
+      }}
+    }}
+
+    function renderBody() {{
+      applyFilter();
+      const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+      page = Math.min(page, totalPages);
+      const start = (page - 1) * pageSize;
+      const visible = filteredRows.slice(start, start + pageSize);
+
+      body.replaceChildren();
+      visible.forEach((row) => {{
+        const tr = document.createElement('tr');
+        columns.forEach((column) => {{
+          const td = document.createElement('td');
+          const value = escapeText(row[column.key]);
+          td.textContent = value;
+          td.title = value;
+          if (column.type === 'number') td.classList.add('number');
+          tr.appendChild(td);
+        }});
+        body.appendChild(tr);
+      }});
+
+      emptyState.hidden = filteredRows.length !== 0;
+      rowCount.textContent = filteredRows.length === rows.length
+        ? `Showing ${{visible.length ? start + 1 : 0}}-${{start + visible.length}} of ${{rows.length}} rows`
+        : `Showing ${{visible.length ? start + 1 : 0}}-${{start + visible.length}} of ${{filteredRows.length}} filtered rows`;
+      pageStatus.textContent = `Page ${{page}} of ${{totalPages}}`;
+      prev.disabled = page <= 1;
+      next.disabled = page >= totalPages;
+    }}
+
+    function render() {{
+      renderBody();
+      reportHeight();
+    }}
+
+    function reportHeight() {{
+      parent.postMessage({{ type: 'iframe:height', height: document.documentElement.scrollHeight }}, '*');
+    }}
+
+    search.addEventListener('input', () => {{ page = 1; render(); }});
+    pageSizeSelect.addEventListener('change', () => {{
+      pageSize = Number(pageSizeSelect.value);
+      page = 1;
+      render();
+    }});
+    prev.addEventListener('click', () => {{ page -= 1; render(); }});
+    next.addEventListener('click', () => {{ page += 1; render(); }});
+    window.addEventListener('load', reportHeight);
+    new ResizeObserver(reportHeight).observe(document.body);
+
+    renderHead();
+    render();
+  </script>
+</body>
+</html>"""
+
+
+def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
+    """Wrap a chart or table spec in a self-contained HTML artifact string."""
     if chart_spec.get("type") == "table":
-        return None
+        return build_table_artifact(rows, {"row_cap": ROW_CAP, "capped": False})
 
     vl_spec = chart_spec_to_vegalite(chart_spec, rows)
     spec_json = json.dumps(vl_spec, default=str)
