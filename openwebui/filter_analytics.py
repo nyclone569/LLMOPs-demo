@@ -12,9 +12,14 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 from typing import Optional
+from pathlib import Path
+import hashlib
 import httpx
 import json
 import os
+import sqlite3
+import time
+import uuid
 import re
 import traceback
 import urllib.parse
@@ -160,6 +165,77 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
   </script>
 </body>
 </html>"""
+
+
+def _webui_upload_dir() -> str:
+    """Return Open WebUI's upload directory, with a local default for the pod."""
+    try:
+        from open_webui.config import UPLOAD_DIR
+        return str(UPLOAD_DIR)
+    except Exception:
+        return os.getenv("UPLOAD_DIR", "/app/backend/data/uploads")
+
+
+def _persist_html_artifact(html: str, db_path: str | None = None, upload_dir: str | None = None) -> str:
+    """Persist an HTML artifact where Open WebUI can render it as an iframe.
+
+    Open WebUI's frontend turns <file type="html" id="..."> tokens into a
+    sandboxed iframe served by /api/v1/files/{id}/content/html. That backend
+    endpoint only serves admin-owned files, so the row must be linked to an
+    admin user.
+    """
+    db_path = db_path or os.getenv("WEBUI_DB_PATH", "/app/backend/data/webui.db")
+    upload_root = Path(upload_dir or _webui_upload_dir())
+    file_id = str(uuid.uuid4())
+    filename = f"nyc_taxi_chart_{file_id}.html"
+    file_path = upload_root / f"{file_id}_{filename}"
+    html_bytes = html.encode("utf-8")
+    now = int(time.time())
+
+    conn = sqlite3.connect(db_path)
+    try:
+        admin = conn.execute(
+            "SELECT id FROM user WHERE role = 'admin' ORDER BY created_at LIMIT 1"
+        ).fetchone()
+        if not admin:
+            raise RuntimeError("Open WebUI HTML chart rendering requires an admin user row")
+
+        upload_root.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(html, encoding="utf-8")
+
+        conn.execute(
+            """
+            INSERT INTO file (id, user_id, filename, meta, created_at, hash, data, updated_at, path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                file_id,
+                admin[0],
+                filename,
+                json.dumps({
+                    "name": filename,
+                    "content_type": "text/html",
+                    "size": len(html_bytes),
+                }),
+                now,
+                hashlib.sha256(html_bytes).hexdigest(),
+                json.dumps({}),
+                now,
+                str(file_path),
+            ),
+        )
+        conn.commit()
+    except Exception:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+    return f'<file type="html" id="{file_id}"></file>'
 
 
 LITELLM_URL = "http://litellm.litellm.svc.cluster.local:4000/v1/chat/completions"
@@ -541,6 +617,6 @@ def _run_analytics(question: str, s3_bucket: str, aws_region: str = AWS_REGION, 
     if chart_spec:
         html = build_html_artifact(chart_spec, rows)
         if html:
-            parts.append(html)
+            parts.append(_persist_html_artifact(html))
 
     return "\n\n".join(parts)

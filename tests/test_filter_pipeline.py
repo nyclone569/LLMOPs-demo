@@ -1,4 +1,5 @@
 import pytest
+import sqlite3
 import sys
 from pathlib import Path
 from unittest.mock import patch, mock_open
@@ -109,6 +110,93 @@ def test_create_s3_secret_uses_credential_chain_without_irsa_env():
     assert auth_mode == "credential_chain"
     assert "PROVIDER CREDENTIAL_CHAIN" in conn.sql[0]
     assert "REGION 'ap-southeast-1'" in conn.sql[0]
+
+
+def test_persist_html_artifact_creates_openwebui_html_file_marker(tmp_path):
+    from filter_analytics import _persist_html_artifact
+
+    db_path = tmp_path / "webui.db"
+    upload_dir = tmp_path / "uploads"
+    html = '<!DOCTYPE html><html><body><div id="chart"></div></body></html>'
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE user (id TEXT, role TEXT, created_at INTEGER)")
+    conn.execute("""
+        CREATE TABLE file (
+            id TEXT,
+            user_id TEXT,
+            filename TEXT,
+            meta JSON,
+            created_at INTEGER,
+            hash TEXT,
+            data JSON,
+            updated_at BIGINT,
+            path TEXT
+        )
+    """)
+    conn.execute("INSERT INTO user (id, role, created_at) VALUES ('admin-user', 'admin', 1)")
+    conn.commit()
+    conn.close()
+
+    marker = _persist_html_artifact(html, db_path=str(db_path), upload_dir=str(upload_dir))
+
+    assert marker.startswith('<file type="html" id="')
+    assert marker.endswith('"></file>')
+    file_id = marker.split('id="', 1)[1].split('"', 1)[0]
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT user_id, filename, path, meta FROM file WHERE id = ?",
+        (file_id,),
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row[0] == "admin-user"
+    assert row[1].endswith(".html")
+    assert Path(row[2]).read_text(encoding="utf-8") == html
+    assert upload_dir in Path(row[2]).parents
+
+
+def test_run_analytics_returns_html_file_embed_not_raw_html():
+    from filter_analytics import _run_analytics
+
+    rows = [
+        {"pickup_year": 2024, "pickup_month": 1, "total_revenue": 10.0},
+        {"pickup_year": 2024, "pickup_month": 2, "total_revenue": 20.0},
+    ]
+
+    with patch(
+        "filter_analytics._run_supervisor",
+        return_value={
+            "table": "kpi_monthly_summary",
+            "confidence": "high",
+            "reasoning": "Monthly revenue question.",
+        },
+    ), patch(
+        "filter_analytics._run_query",
+        return_value={
+            "sql": "SELECT pickup_year, pickup_month, total_revenue FROM kpi_monthly_summary",
+            "rows": rows,
+            "capped": False,
+        },
+    ), patch(
+        "filter_analytics._run_summarize",
+        return_value={
+            "summary": "Revenue increased in February.",
+            "chart_spec": {"type": "line", "x": "pickup_month", "y": "total_revenue", "series": []},
+        },
+    ), patch(
+        "filter_analytics._persist_html_artifact",
+        return_value='<file type="html" id="chart-1"></file>',
+        create=True,
+    ):
+        result = _run_analytics("show monthly revenue trend", "bucket")
+
+    assert "Revenue increased in February." in result
+    assert '<file type="html" id="chart-1"></file>' in result
+    assert "<!DOCTYPE html>" not in result
+    assert "vegaEmbed" not in result
 
 
 @pytest.mark.asyncio
