@@ -158,8 +158,8 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
   <style>
-    html, body {{ margin: 0; padding: 0; width: 100%; min-height: 420px; overflow: hidden; }}
-    #chart {{ width: 100%; min-height: 420px; }}
+    html, body {{ margin: 0; padding: 0; width: 100%; min-height: 420px; }}
+    #chart {{ width: 100%; height: 420px; min-height: 420px; }}
     .vega-embed, .vega-embed > canvas, .vega-embed > svg {{ max-width: 100%; }}
   </style>
 </head>

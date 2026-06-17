@@ -89,15 +89,16 @@ def test_vegalite_spec_uses_responsive_chart_dimensions():
     assert spec["autosize"] == {"type": "fit", "contains": "padding", "resize": True}
 
 
-def test_html_artifact_avoids_internal_scrollbars():
+def test_html_artifact_does_not_clip_chart_when_iframe_resize_is_blocked():
     rows = [{"pickup_month": 1, "total_revenue": 10.0}]
     html = build_html_artifact(
         {"type": "line", "x": "pickup_month", "y": "total_revenue"},
         rows,
     )
 
-    assert "overflow: hidden" in html
+    assert "overflow: hidden" not in html
     assert "min-height: 420px" in html
+    assert "height: 420px" in html
     assert "renderer: 'canvas'" in html
 
 
