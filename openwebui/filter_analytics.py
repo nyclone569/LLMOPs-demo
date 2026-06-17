@@ -94,7 +94,8 @@ def chart_spec_to_vegalite(chart_spec: dict, rows: list[dict]) -> dict:
             "y": {"field": y_field, "type": "quantitative"},
         },
         "width": "container",
-        "height": 300,
+        "height": 420,
+        "autosize": {"type": "fit", "contains": "padding", "resize": True},
     }
 
 
@@ -156,12 +157,16 @@ def build_html_artifact(chart_spec: dict, rows: list[dict]) -> str | None:
   <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
   <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
-  <style>body {{ margin: 0; }} #chart {{ width: 100%; }}</style>
+  <style>
+    html, body {{ margin: 0; padding: 0; width: 100%; min-height: 420px; overflow: hidden; }}
+    #chart {{ width: 100%; min-height: 420px; }}
+    .vega-embed, .vega-embed > canvas, .vega-embed > svg {{ max-width: 100%; }}
+  </style>
 </head>
 <body>
   <div id="chart"></div>
   <script>
-    vegaEmbed('#chart', {spec_json}, {{actions: false}});
+    vegaEmbed('#chart', {spec_json}, {{actions: false, renderer: 'canvas'}});
   </script>
 </body>
 </html>"""
@@ -235,7 +240,7 @@ def _persist_html_artifact(html: str, db_path: str | None = None, upload_dir: st
     finally:
         conn.close()
 
-    return f'<file type="html" id="{file_id}"></file>'
+    return f'<file type="html" id="{file_id}">'
 
 
 LITELLM_URL = "http://litellm.litellm.svc.cluster.local:4000/v1/chat/completions"

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, mock_open
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
-from filter_analytics import _strip_fences, _validate_sql, SQLValidationError
+from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite
 
 
 class _FakeHTTPResponse:
@@ -78,6 +78,29 @@ def test_validate_sql_allows_cte():
     )
 
 
+def test_vegalite_spec_uses_responsive_chart_dimensions():
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    spec = chart_spec_to_vegalite(
+        {"type": "line", "x": "pickup_month", "y": "total_revenue"},
+        rows,
+    )
+
+    assert spec["height"] >= 420
+    assert spec["autosize"] == {"type": "fit", "contains": "padding", "resize": True}
+
+
+def test_html_artifact_avoids_internal_scrollbars():
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    html = build_html_artifact(
+        {"type": "line", "x": "pickup_month", "y": "total_revenue"},
+        rows,
+    )
+
+    assert "overflow: hidden" in html
+    assert "min-height: 420px" in html
+    assert "renderer: 'canvas'" in html
+
+
 def test_create_s3_secret_uses_web_identity_when_irsa_env_present():
     from filter_analytics import _create_s3_secret
 
@@ -141,7 +164,8 @@ def test_persist_html_artifact_creates_openwebui_html_file_marker(tmp_path):
     marker = _persist_html_artifact(html, db_path=str(db_path), upload_dir=str(upload_dir))
 
     assert marker.startswith('<file type="html" id="')
-    assert marker.endswith('"></file>')
+    assert marker.endswith('">')
+    assert '</file>' not in marker
     file_id = marker.split('id="', 1)[1].split('"', 1)[0]
 
     conn = sqlite3.connect(db_path)
@@ -188,13 +212,14 @@ def test_run_analytics_returns_html_file_embed_not_raw_html():
         },
     ), patch(
         "filter_analytics._persist_html_artifact",
-        return_value='<file type="html" id="chart-1"></file>',
+        return_value='<file type="html" id="chart-1">',
         create=True,
     ):
         result = _run_analytics("show monthly revenue trend", "bucket")
 
     assert "Revenue increased in February." in result
-    assert '<file type="html" id="chart-1"></file>' in result
+    assert '<file type="html" id="chart-1">' in result
+    assert '</file>' not in result
     assert "<!DOCTYPE html>" not in result
     assert "vegaEmbed" not in result
 
