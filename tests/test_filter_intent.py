@@ -2,7 +2,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
-from filter_analytics import classify_intent, INTENT_ANALYTICS, INTENT_AMBIGUOUS, INTENT_CHAT
+from filter_analytics import (
+    classify_intent,
+    INTENT_ANALYTICS,
+    INTENT_AMBIGUOUS,
+    INTENT_CHAT,
+    _select_presentation_mode,
+)
 from filter_analytics import build_html_artifact, chart_spec_to_vegalite
 
 
@@ -56,6 +62,33 @@ def test_no_false_positive_farewell():
 
 def test_no_false_positive_per_in_performance():
     assert classify_intent("check system performance metrics") == INTENT_CHAT
+
+
+def test_select_presentation_mode_table_prompt():
+    rows = [{"month": "Jan", "revenue": 1000}]
+    assert _select_presentation_mode("show monthly revenue as a table", rows) == "table"
+
+
+def test_select_presentation_mode_chart_prompt():
+    rows = [{"month": "Jan", "revenue": 1000}]
+    assert _select_presentation_mode("plot monthly revenue as a chart", rows) == "chart"
+
+
+def test_select_presentation_mode_both_prompt():
+    rows = [{"borough": "Manhattan", "revenue": 1000}]
+    assert (
+        _select_presentation_mode("show revenue by borough with chart and table", rows)
+        == "both"
+    )
+
+
+def test_select_presentation_mode_empty_rows_is_text():
+    assert _select_presentation_mode("show monthly revenue as a table", []) == "text"
+
+
+def test_select_presentation_mode_no_display_preference_is_auto():
+    rows = [{"month": "Jan", "revenue": 1000}]
+    assert _select_presentation_mode("show monthly revenue trend", rows) == "auto"
 
 
 def test_html_artifact_built_from_bar_chart_spec():

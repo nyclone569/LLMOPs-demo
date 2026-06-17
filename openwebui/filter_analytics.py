@@ -72,6 +72,28 @@ ANALYTICS_WORDS = {
     "hourly",
 }
 
+TABLE_PRESENTATION_WORDS = {
+    "table",
+    "rows",
+    "row",
+    "list",
+    "tabular",
+    "show data",
+    "result table",
+    "data table",
+}
+
+CHART_PRESENTATION_WORDS = {
+    "chart",
+    "graph",
+    "plot",
+    "visualize",
+    "visualise",
+    "trend line",
+    "bar chart",
+    "line chart",
+}
+
 INTENT_ANALYTICS = "analytics"
 INTENT_AMBIGUOUS = "ambiguous"
 INTENT_CHAT = "chat"
@@ -94,6 +116,28 @@ def classify_intent(message: str) -> str:
     if domain_count >= 1:
         return INTENT_AMBIGUOUS
     return INTENT_CHAT
+
+
+def _has_phrase(message: str, phrases: set[str]) -> bool:
+    lower = message.lower()
+    return any(re.search(rf"\b{re.escape(phrase)}\b", lower) for phrase in phrases)
+
+
+def _select_presentation_mode(question: str, rows: list[dict]) -> str:
+    """Return chart, table, both, text, or auto based on explicit display intent."""
+    if not rows:
+        return "text"
+
+    wants_table = _has_phrase(question, TABLE_PRESENTATION_WORDS)
+    wants_chart = _has_phrase(question, CHART_PRESENTATION_WORDS)
+
+    if wants_table and wants_chart:
+        return "both"
+    if wants_table:
+        return "table"
+    if wants_chart:
+        return "chart"
+    return "auto"
 
 
 def chart_spec_to_vegalite(chart_spec: dict, rows: list[dict]) -> dict:
