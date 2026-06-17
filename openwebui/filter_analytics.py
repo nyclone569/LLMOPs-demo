@@ -296,16 +296,19 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
         sql_capped = sql
 
     import duckdb
-    import os
 
     def _execute():
-        os.environ.setdefault("HOME", "/tmp")
-        conn = duckdb.connect(config={"memory_limit": "512MB"})
+        conn = duckdb.connect(config={"memory_limit": "512MB", "extension_directory": "/tmp/duckdb-extensions"})
         try:
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
-            conn.execute(f"SET s3_region='{aws_region}';")
-            conn.execute("SET s3_use_credential_chain=true;")
+            conn.execute(f"""
+                CREATE OR REPLACE SECRET _s3 (
+                    TYPE S3,
+                    PROVIDER CREDENTIAL_CHAIN,
+                    REGION '{aws_region}'
+                )
+            """)
             conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
             return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
         finally:
