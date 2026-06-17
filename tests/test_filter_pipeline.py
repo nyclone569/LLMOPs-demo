@@ -233,11 +233,7 @@ async def test_pipe_analytics_emits_status_events():
     with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
         result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
-    assert result == ""
-    message_events = [e for e in emitted if e["type"] == "message"]
-    assert len(message_events) == 2
-    assert message_events[0]["data"]["content"] == "> **Table:** `kpi`\n"
-    assert message_events[1]["data"]["content"] == "Summary"
+    assert result == "> **Table:** `kpi`\nSummary"
 
 
 @pytest.mark.asyncio
@@ -536,17 +532,12 @@ async def test_full_pipe_integration_streams_trace_and_summary():
 
         result = await pipe.pipe(body, __event_emitter__=mock_emitter)
 
-    assert result == ""
-
-    message_events = [e for e in emitted if e["type"] == "message"]
-    full = "".join(e["data"]["content"] for e in message_events)
-
-    assert "> **Table:** `kpi_monthly_summary`" in full
-    assert "Monthly revenue match" in full
-    assert "> **SQL:**" in full
-    assert "> **Result:** 2 rows" in full
-    assert "---" in full
-    assert "Revenue grew from $10M to $20M." in full
+    assert "> **Table:** `kpi_monthly_summary`" in result
+    assert "Monthly revenue match" in result
+    assert "> **SQL:**" in result
+    assert "> **Result:** 2 rows" in result
+    assert "---" in result
+    assert "Revenue grew from $10M to $20M." in result
 
     embed_events = [e for e in emitted if e["type"] == "embeds"]
     assert len(embed_events) == 1
