@@ -3,7 +3,7 @@ title: NYC Taxi Analytics Pipe
 author: llmops
 version: 1.0.0
 license: MIT
-requirements:
+requirements: duckdb==1.2.2, httpx>=0.27, pydantic>=2
 """
 
 from __future__ import annotations
@@ -267,6 +267,8 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     schema = registry[table]
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
         raise ValueError(f"Invalid aws_region format: {aws_region!r}")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]", s3_bucket):
+        raise ValueError(f"Invalid s3_bucket: {s3_bucket!r}")
     col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
     messages = [
         {"role": "system", "content": _QUERY_SYSTEM},
@@ -300,6 +302,7 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     def _execute():
         conn = duckdb.connect(config={"memory_limit": "512MB", "extension_directory": "/tmp/duckdb-extensions"})
         try:
+            conn.execute("SET statement_timeout='30s'")
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
             conn.execute(f"""
