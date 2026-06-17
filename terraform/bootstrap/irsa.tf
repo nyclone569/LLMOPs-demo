@@ -21,7 +21,7 @@ locals {
       }
       analytics_open_webui = {
         namespace       = "open-webui"
-        service_account = "open-webui"
+        service_account = "open-webui-sa"
       }
       litellm = {
         namespace       = "litellm"

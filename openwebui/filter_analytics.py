@@ -302,7 +302,6 @@ def _run_query(question: str, table: str, registry: dict, s3_bucket: str, aws_re
     def _execute():
         conn = duckdb.connect(config={"memory_limit": "512MB", "extension_directory": "/tmp/duckdb-extensions"})
         try:
-            conn.execute("SET statement_timeout='30s'")
             path = f"s3://{s3_bucket}/{table}/*.parquet"
             conn.execute("INSTALL httpfs; LOAD httpfs;")
             conn.execute(f"""
