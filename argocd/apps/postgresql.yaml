@@ -15,7 +15,7 @@ spec:
       targetRevision: main
       path: argocd/manifests
       directory:
-        include: "postgresql.yaml"
+        include: "postgresql*.yaml"
     - repoURL: https://github.com/nyclone569/LLMOPs.git
       targetRevision: main
       path: argocd/external-secrets
