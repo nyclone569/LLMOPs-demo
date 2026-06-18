@@ -52,9 +52,10 @@ spec:
       - postgresql
   selector:
     matchLabels:
-      app.kubernetes.io/name: postgresql
+      app: postgresql-primary
   endpoints:
     - port: metrics
+      interval: 30s
       path: /metrics
 # Note: Open WebUI 0.9.5 has no native Prometheus /metrics endpoint —
 # only OpenTelemetry OTLP push (ENABLE_OTEL_METRICS). The dashboard
