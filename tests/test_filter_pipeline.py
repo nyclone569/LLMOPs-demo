@@ -451,6 +451,132 @@ async def test_stream_analytics_yields_reasoning_trace_and_summary():
 
 
 @pytest.mark.asyncio
+async def test_stream_analytics_table_prompt_emits_table_artifact_after_summary():
+    rows = [{"pickup_month": 1, "total_revenue": 10.0}]
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [{"name": "pickup_month", "type": "int32"}, {"name": "total_revenue", "type": "double"}], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+    summary_complete = False
+
+    async def mock_emitter(event):
+        emitted.append({"event": event, "summary_complete": summary_complete})
+
+    async def fake_summary(*args, **kwargs):
+        nonlocal summary_complete
+        yield "Revenue summary."
+        summary_complete = True
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
+         patch("filter_analytics._run_chart_spec") as mock_chart_spec, \
+         patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_summary()):
+
+        chunks = []
+        async for chunk in _stream_analytics("show monthly revenue as a table", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    assert "Revenue summary." in "".join(chunks)
+    mock_chart_spec.assert_not_called()
+    embed_events = [entry for entry in emitted if entry["event"]["type"] == "embeds"]
+    assert len(embed_events) == 1
+    assert embed_events[0]["summary_complete"] is True
+    assert embed_events[0]["event"]["data"]["embeds"] == ["<html>table</html>"]
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_both_prompt_emits_chart_and_table_artifacts():
+    rows = [{"borough": "Manhattan", "total_revenue": 10.0}]
+    registry = {"kpi_borough_comparison": {"tier": "kpi", "columns": [{"name": "borough", "type": "varchar"}, {"name": "total_revenue", "type": "double"}], "example_questions": [], "description": "Borough comparison"}}
+
+    emitted = []
+
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    async def fake_summary(*args, **kwargs):
+        yield "Revenue summary."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_borough_comparison", "confidence": "high", "reasoning": "Borough revenue question"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT borough, total_revenue FROM kpi_borough_comparison", "rows": rows, "capped": True}), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "bar", "x": "borough", "y": "total_revenue"}), \
+         patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
+         patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_summary()):
+
+        chunks = []
+        async for chunk in _stream_analytics("show revenue by borough with chart and table", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    assert "Revenue summary." in "".join(chunks)
+    embed_events = [event for event in emitted if event["type"] == "embeds"]
+    assert len(embed_events) == 1
+    assert embed_events[0]["data"]["embeds"] == ["<html>chart</html>", "<html>table</html>"]
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_auto_table_chart_spec_emits_table_artifact():
+    rows = [{"month": "Jan", "total_revenue": 10.0}]
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [{"name": "month", "type": "varchar"}, {"name": "total_revenue", "type": "double"}], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    async def fake_summary(*args, **kwargs):
+        yield "Revenue summary."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "table", "x": "month", "y": "total_revenue"}), \
+         patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_summary()):
+
+        chunks = []
+        async for chunk in _stream_analytics("show monthly revenue", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    assert "Revenue summary." in "".join(chunks)
+    embed_events = [event for event in emitted if event["type"] == "embeds"]
+    assert len(embed_events) == 1
+    assert embed_events[0]["data"]["embeds"] == ["<html>table</html>"]
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_chart_prompt_falls_back_to_table_without_chart_spec():
+    rows = [{"month": "Jan", "total_revenue": 10.0}]
+    registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [{"name": "month", "type": "varchar"}, {"name": "total_revenue", "type": "double"}], "example_questions": [], "description": "Monthly summary"}}
+
+    emitted = []
+
+    async def mock_emitter(event):
+        emitted.append(event)
+
+    async def fake_summary(*args, **kwargs):
+        yield "Revenue summary."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_query", return_value={"sql": "SELECT month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
+         patch("filter_analytics._stream_summary", return_value=fake_summary()):
+
+        chunks = []
+        async for chunk in _stream_analytics("show monthly revenue as a chart", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
+            chunks.append(chunk)
+
+    assert "Revenue summary." in "".join(chunks)
+    embed_events = [event for event in emitted if event["type"] == "embeds"]
+    assert len(embed_events) == 1
+    assert embed_events[0]["data"]["embeds"] == ["<html>table</html>"]
+
+
+@pytest.mark.asyncio
 async def test_stream_analytics_yields_clarification_on_low_confidence():
     registry = {"kpi_monthly_summary": {"tier": "kpi", "columns": [], "example_questions": [], "description": "Monthly summary"}}
 

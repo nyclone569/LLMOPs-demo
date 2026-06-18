@@ -1286,16 +1286,39 @@ async def _stream_analytics(
             await emitter({"type": "status", "data": {"description": "Done", "done": True}})
         return
 
+    artifacts: list[str] = []
+    artifact_note = ""
+    mode = _select_presentation_mode(question, rows)
+
     if emitter:
-        await emitter({"type": "status", "data": {"description": f"Queried {len(rows)} rows — preparing chart...", "done": False}})
+        await emitter({"type": "status", "data": {"description": f"Queried {len(rows)} rows — preparing response...", "done": False}})
+
     try:
-        chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
-        if chart_spec:
-            html = build_html_artifact(chart_spec, rows)
-            if html and emitter:
-                await emitter({"type": "embeds", "data": {"embeds": [html]}})
+        chart_spec = None
+        if mode in {"chart", "both", "auto"}:
+            chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
+
+        if mode == "auto" and chart_spec and chart_spec.get("type") == "table":
+            mode = "table"
+        elif mode == "auto" and chart_spec:
+            mode = "chart"
+        elif mode == "auto":
+            mode = "table"
+
+        if mode in {"chart", "both"}:
+            chart_html = build_html_artifact(chart_spec, rows) if chart_spec else None
+            if chart_html:
+                artifacts.append(chart_html)
+            elif mode == "chart":
+                table_html = build_table_artifact(rows, {"row_cap": row_cap, "capped": capped})
+                artifacts.append(table_html)
+
+        if mode in {"table", "both"}:
+            table_html = build_table_artifact(rows, {"row_cap": row_cap, "capped": capped})
+            artifacts.append(table_html)
     except Exception:
-        pass
+        traceback.print_exc()
+        artifact_note = "\n\n> **Note:** The requested table or chart could not be rendered.\n"
 
     if emitter:
         await emitter({"type": "status", "data": {"description": "Writing summary...", "done": False}})
@@ -1306,6 +1329,12 @@ async def _stream_analytics(
     except Exception as e:
         traceback.print_exc()
         yield f"\n\n> **Error:** Could not generate summary — {e}\n"
+
+    if artifact_note:
+        yield artifact_note
+
+    if artifacts and emitter:
+        await emitter({"type": "embeds", "data": {"embeds": artifacts}})
 
     yield "\n"
     if emitter:
