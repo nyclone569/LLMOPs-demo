@@ -520,6 +520,7 @@ All Prometheus rules are defined in `argocd/monitoring/prometheus-rules.yaml`. Q
 | PodHighMemoryUsage | > 90% memory limit for 10m | warning |
 | NodeUnderPressure | MemoryPressure or DiskPressure for 5m | warning |
 | PostgreSQLHighConnectionUsage | > 80% of max_connections for 5m | warning |
+| LangfuseIngestionDelayHigh | Redis queue >500 items for 10m | warning |
 
 ### llmops-cost-tracking (eval interval: 60s)
 
@@ -527,10 +528,17 @@ All Prometheus rules are defined in `argocd/monitoring/prometheus-rules.yaml`. Q
 |---|---|---|
 | DailyLLMCostSpike | 24h spend > $200 | warning |
 | UserHighTokenConsumption | one user > 30% of daily tokens | warning |
+| TeamHighTokenConsumption | one team > 50% of daily tokens | warning |
 
 ### llmops-security (eval interval: 30s)
 
 | Alert | Condition | Severity |
 |---|---|---|
 | UnusualRequestPattern | request rate > 2× hourly average for 10m | warning |
+
+### llmops-security-grafana (Grafana-managed, Loki datasource, eval interval: 5m)
+
+| Alert | Condition | Severity | On-call action |
+|---|---|---|---|
+| SensitivePromptDetected | sensitive keyword in LiteLLM logs for 2m | warning | Open Log Explorer, filter namespace=litellm, check if real data or test traffic |
 
