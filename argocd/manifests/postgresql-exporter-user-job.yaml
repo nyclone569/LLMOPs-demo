@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-postgres-exporter-user
+  namespace: postgresql
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
+spec:
+  activeDeadlineSeconds: 120
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-user
+          image: bitnami/postgresql:latest
+          command: [bash, -c]
+          args:
+            - |
+              until pg_isready -h postgresql-primary -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 3
+              done
+              PGPASSWORD=$POSTGRESQL_PASSWORD psql \
+                -h postgresql-primary \
+                -U postgres \
+                -d postgres \
+                -c "DO \$\$ BEGIN
+                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'exporter') THEN
+                    CREATE USER exporter WITH PASSWORD '$POSTGRES_EXPORTER_PASSWORD' CONNECTION LIMIT 3;
+                    GRANT pg_monitor TO exporter;
+                  END IF;
+                END \$\$;"
+          env:
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmops-apikeys-secret
+                  key: POSTGRESQL_PASSWORD
+            - name: POSTGRES_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llmops-apikeys-secret
+                  key: POSTGRES_EXPORTER_PASSWORD
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 100m, memory: 128Mi}
