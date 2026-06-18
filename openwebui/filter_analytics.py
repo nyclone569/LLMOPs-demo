@@ -194,6 +194,16 @@ def _strip_fences(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
+def _normalize_duckdb_sql(sql: str) -> str:
+    """Normalize common non-DuckDB date syntax produced by SQL LLMs."""
+    return re.sub(
+        r"\bDATE_SUB\s*\(\s*CURRENT_DATE\s*\(\s*\)\s*,\s*INTERVAL\s+(\d+)\s+DAY\s*\)",
+        r"CURRENT_DATE - INTERVAL \1 DAY",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
 def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
     stripped = sql.strip().rstrip(";").strip()
     if _FILE_FUNCTIONS.search(stripped):
@@ -1009,6 +1019,7 @@ Rules:
 - Revenue = total_fare_amount (excludes tips)
 - Borough values: Manhattan, Brooklyn, Queens, Bronx, Staten Island
 - Peak hours: 7-9 and 17-20 (24h)
+- Use DuckDB SQL syntax for dates; for recent windows use CURRENT_DATE - INTERVAL 7 DAY, not DATE_SUB()
 - Do not use read_parquet(), httpfs, or any file functions"""
 
 
@@ -1039,7 +1050,7 @@ def _run_query(
     raw = _llm_chat(
         messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
     )
-    sql = _strip_fences(raw).rstrip(";").strip()
+    sql = _normalize_duckdb_sql(_strip_fences(raw).rstrip(";").strip())
     _validate_sql(sql, table, set(registry.keys()))
 
     # Check whether the *top-level* query already has a LIMIT. Scanning the full

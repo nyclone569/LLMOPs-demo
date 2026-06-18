@@ -7,6 +7,7 @@ from filter_analytics import (
     INTENT_ANALYTICS,
     INTENT_AMBIGUOUS,
     INTENT_CHAT,
+    _normalize_duckdb_sql,
     _select_presentation_mode,
 )
 from filter_analytics import build_html_artifact, chart_spec_to_vegalite
@@ -89,6 +90,19 @@ def test_select_presentation_mode_empty_rows_is_text():
 def test_select_presentation_mode_no_display_preference_is_auto():
     rows = [{"month": "Jan", "revenue": 1000}]
     assert _select_presentation_mode("show monthly revenue trend", rows) == "auto"
+
+
+def test_normalize_duckdb_sql_rewrites_mysql_current_date_subtract_interval():
+    sql = (
+        "SELECT pickup_date, revenue FROM kpi_daily_overview "
+        "WHERE pickup_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)"
+    )
+
+    normalized = _normalize_duckdb_sql(sql)
+
+    assert "DATE_SUB" not in normalized
+    assert "CURRENT_DATE()" not in normalized
+    assert "pickup_date >= CURRENT_DATE - INTERVAL 7 DAY" in normalized
 
 
 def test_html_artifact_built_from_bar_chart_spec():
