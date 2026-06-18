@@ -269,7 +269,7 @@ data:
               "gridPos": {"h": 4, "w": 6, "x": 0, "y": 29},
               "targets": [
                 {
-                  "expr": "sum(kube_deployment_status_replicas_ready{namespace=\"open-webui\"})",
+                  "expr": "sum(kube_pod_status_ready{namespace="open-webui",condition="true"})",
                   "legendFormat": ""
                 }
               ],
