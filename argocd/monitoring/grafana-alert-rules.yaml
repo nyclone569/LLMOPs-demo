@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llmops-grafana-alert-rules
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  sensitive-prompt-alerts.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: llmops-security
+        folder: LLMOps
+        interval: 5m
+        rules:
+          - uid: llmops-sensitive-prompt
+            title: SensitivePromptDetected
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: P8E80F9AEF21F6940
+                model:
+                  expr: 'count_over_time({namespace="litellm"} |~ "(?i)(password|secret|api.?key|token|credential|ssn|credit.?card)" [5m])'
+                  queryType: range
+              - refId: C
+                datasourceUid: "-100"
+                model:
+                  conditions:
+                    - evaluator:
+                        params: [0]
+                        type: gt
+                      query:
+                        params: [A]
+                      reducer:
+                        type: sum
+                  type: classic_conditions
+            noDataState: OK
+            execErrState: OK
+            for: 2m
+            labels:
+              severity: warning
+              component: security
+            annotations:
+              summary: Sensitive content detected in LiteLLM logs
+              description: Log lines matched sensitive pattern in last 5 minutes.
