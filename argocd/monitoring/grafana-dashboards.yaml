@@ -204,6 +204,58 @@ data:
           "fieldConfig": {
             "defaults": {"unit": "cores"}
           }
+        },
+        {
+          "id": 13,
+          "title": "PostgreSQL Connection Usage",
+          "type": "gauge",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 36},
+          "targets": [
+            {
+              "expr": "sum(pg_stat_activity_count) / sum(pg_settings_max_connections)",
+              "legendFormat": "conn %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.6},
+                  {"color": "red", "value": 0.8}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 14,
+          "title": "Langfuse Queue Depth",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 36},
+          "targets": [
+            {
+              "expr": "sum(redis_key_size{key=~\"bull:langfuse-new-events:.*\"})",
+              "legendFormat": "queue items"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 100},
+                  {"color": "red", "value": 500}
+                ]
+              }
+            }
+          }
         }
       ]
     }
@@ -420,6 +472,33 @@ data:
               "legendFormat": "{{ litellm_model_name }} failures"
             }
           ]
+        },
+        {
+          "id": 8,
+          "title": "Sensitive Prompt Detections (24h rolling)",
+          "type": "stat",
+          "datasource": {"type": "loki", "uid": "P8E80F9AEF21F6940"},
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 32},
+          "targets": [
+            {
+              "expr": "count_over_time({namespace=\"litellm\"} |~ \"(?i)(password|secret|api.?key|token|credential|ssn|credit.?card)\" [24h])",
+              "refId": "A"
+            }
+          ],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 10}
+                ]
+              }
+            }
+          }
         }
       ]
     }
