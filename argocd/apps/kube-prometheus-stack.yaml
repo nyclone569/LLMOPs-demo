@@ -112,6 +112,12 @@ spec:
               cpu: 500m
               memory: 512Mi
 
+          sidecar:
+            alerts:
+              enabled: true
+              label: grafana_alert
+              labelValue: "1"
+
           # Additional data sources
           additionalDataSources:
             - name: Loki
