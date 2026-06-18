@@ -32,7 +32,10 @@ primary:
 metrics:
   enabled: true
   serviceMonitor:
-    enabled: false
+    enabled: true
+    namespace: monitoring
+    labels:
+      release: kube-prometheus-stack
   resources:
     requests:
       memory: "64Mi"
