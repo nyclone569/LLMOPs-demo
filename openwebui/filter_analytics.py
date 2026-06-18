@@ -1046,6 +1046,23 @@ def _select_table_candidates(question: str, registry: dict, limit: int = 8) -> l
     return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
 
 
+def _candidate_registry(registry: dict, candidates: list[dict]) -> dict:
+    return {
+        candidate["table"]: registry[candidate["table"]]
+        for candidate in candidates
+        if candidate.get("table") in registry
+    }
+
+
+def _supervisor_from_exact_candidate(candidate: dict) -> dict:
+    reason = "; ".join(candidate.get("reasons", [])) or "exact table match"
+    return {
+        "table": candidate["table"],
+        "confidence": "high",
+        "reasoning": reason,
+    }
+
+
 def _run_supervisor(
     question: str,
     registry: dict,
@@ -1392,8 +1409,21 @@ async def _stream_analytics(
 
     if emitter:
         await emitter({"type": "status", "data": {"description": "Selecting table from registry...", "done": False}})
+
+    candidates: list[dict] = []
     try:
-        supervisor = _run_supervisor(question, registry, litellm_url, litellm_model, api_key)
+        candidates = _select_table_candidates(question, registry)
+        exact_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.get("match_type") in {"exact_table_name", "exact_alias"}
+        ]
+        if len(exact_candidates) == 1:
+            supervisor = _supervisor_from_exact_candidate(exact_candidates[0])
+        else:
+            prompt_candidates = exact_candidates or candidates
+            prompt_registry = _candidate_registry(registry, prompt_candidates) if prompt_candidates else registry
+            supervisor = _run_supervisor(question, prompt_registry, litellm_url, litellm_model, api_key)
     except Exception as e:
         yield f"> **Error:** Table selection failed — {e}\n"
         if emitter:
