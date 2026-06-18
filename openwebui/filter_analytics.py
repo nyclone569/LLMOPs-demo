@@ -925,7 +925,9 @@ def _registry_as_prompt(registry: dict) -> str:
             f"grain: {entry['grain']}" if entry.get("grain") else None,
             _format_prompt_list("dimensions", _as_list(entry.get("dimensions")), separator=", "),
             _format_prompt_list("measures", _as_list(entry.get("measures")), separator=", "),
-            _format_prompt_list("date_columns", _as_list(entry.get("date_columns")), none_label="none"),
+            _format_prompt_list("date_columns", _as_list(entry.get("date_columns")), none_label="none")
+            if "date_columns" in entry
+            else None,
             _format_prompt_list("use_for", _as_list(entry.get("use_for"))),
             _format_prompt_list("avoid_for", _as_list(entry.get("avoid_for"))),
             _format_prompt_list("examples", _as_list(entry.get("example_questions"))),

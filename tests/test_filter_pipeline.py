@@ -163,7 +163,9 @@ def test_registry_as_prompt_includes_optional_metadata():
     assert "dimensions: zone, borough" in prompt
     assert "measures: net_flow, imbalance_score" in prompt
     assert "date_columns: none" in prompt
+    assert "use_for: zone pickup/dropoff imbalance" in prompt
     assert "avoid_for: daily trends because this table has no date column" in prompt
+    assert "examples: show table kpi zone net flow" in prompt
 
 
 def test_registry_as_prompt_supports_old_minimal_entries():
@@ -183,6 +185,7 @@ def test_registry_as_prompt_supports_old_minimal_entries():
     assert "kpi_monthly_summary" in prompt
     assert "total_revenue(double)" in prompt
     assert "aliases:" not in prompt
+    assert "date_columns:" not in prompt
 
 
 def test_strip_fences_removes_sql_block():
