@@ -97,7 +97,10 @@ metrics:
     repository: bitnami/redis-exporter
     tag: latest
   serviceMonitor:
-    enabled: false  # Enable if Prometheus Operator is installed
+    enabled: true
+    namespace: monitoring
+    labels:
+      release: kube-prometheus-stack
 
   extraArgs:
     check-keys: "bull:langfuse-new-events:wait,bull:langfuse-new-events:active,bull:langfuse-new-events:delayed"

@@ -207,6 +207,7 @@ spec:
               /
               sum(increase(litellm_total_tokens_metric_total[24h]))
             ) > 0.50
+          for: 15m
           labels:
             severity: warning
             component: cost
