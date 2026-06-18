@@ -137,6 +137,54 @@ def test_select_table_candidates_returns_empty_for_no_signal():
     assert _select_table_candidates("explain linked lists", registry) == []
 
 
+def test_registry_as_prompt_includes_optional_metadata():
+    from filter_analytics import _registry_as_prompt
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["kpi zone net flow", "zone net flow"],
+            "grain": "one row per taxi zone",
+            "dimensions": ["zone", "borough"],
+            "measures": ["net_flow", "imbalance_score"],
+            "date_columns": [],
+            "use_for": ["zone pickup/dropoff imbalance"],
+            "avoid_for": ["daily trends because this table has no date column"],
+            "example_questions": ["show table kpi zone net flow"],
+        }
+    }
+
+    prompt = _registry_as_prompt(registry)
+
+    assert "aliases: kpi zone net flow; zone net flow" in prompt
+    assert "grain: one row per taxi zone" in prompt
+    assert "dimensions: zone, borough" in prompt
+    assert "measures: net_flow, imbalance_score" in prompt
+    assert "date_columns: none" in prompt
+    assert "avoid_for: daily trends because this table has no date column" in prompt
+
+
+def test_registry_as_prompt_supports_old_minimal_entries():
+    from filter_analytics import _registry_as_prompt
+
+    registry = {
+        "kpi_monthly_summary": {
+            "description": "Monthly summary",
+            "tier": "kpi",
+            "columns": [{"name": "total_revenue", "type": "double"}],
+            "example_questions": [],
+        }
+    }
+
+    prompt = _registry_as_prompt(registry)
+
+    assert "kpi_monthly_summary" in prompt
+    assert "total_revenue(double)" in prompt
+    assert "aliases:" not in prompt
+
+
 def test_strip_fences_removes_sql_block():
     assert _strip_fences("```sql\nSELECT 1\n```") == "SELECT 1"
 

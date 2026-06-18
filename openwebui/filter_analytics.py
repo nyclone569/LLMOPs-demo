@@ -891,14 +891,48 @@ Select ONE table. Output ONLY valid JSON, no explanation:
 {"table": "<table_name>", "confidence": "high|low", "reasoning": "<one sentence>"}"""
 
 
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)] if str(value).strip() else []
+
+
+def _format_prompt_list(
+    label: str,
+    values: list[str],
+    none_label: str | None = None,
+    separator: str = "; ",
+) -> str | None:
+    if values:
+        return f"{label}: " + separator.join(values)
+    if none_label is not None:
+        return f"{label}: {none_label}"
+    return None
+
+
 def _registry_as_prompt(registry: dict) -> str:
     lines = []
     for table, entry in registry.items():
         col_list = ", ".join(f"{c['name']}({c['type']})" for c in entry["columns"])
-        examples = "; ".join(entry.get("example_questions", []))
-        lines.append(
-            f"- {table} [{entry['tier']}]: {entry['description']} | columns: {col_list} | examples: {examples}"
-        )
+        parts = [
+            f"- {table} [{entry['tier']}]: {entry['description']}",
+        ]
+
+        metadata_parts = [
+            _format_prompt_list("aliases", _as_list(entry.get("aliases"))),
+            f"grain: {entry['grain']}" if entry.get("grain") else None,
+            _format_prompt_list("dimensions", _as_list(entry.get("dimensions")), separator=", "),
+            _format_prompt_list("measures", _as_list(entry.get("measures")), separator=", "),
+            _format_prompt_list("date_columns", _as_list(entry.get("date_columns")), none_label="none"),
+            _format_prompt_list("use_for", _as_list(entry.get("use_for"))),
+            _format_prompt_list("avoid_for", _as_list(entry.get("avoid_for"))),
+            _format_prompt_list("examples", _as_list(entry.get("example_questions"))),
+            f"columns: {col_list}",
+        ]
+        parts.extend(part for part in metadata_parts if part)
+        lines.append(" | ".join(parts))
     return "\n".join(lines)
 
 
@@ -913,14 +947,6 @@ def _normalize_match_text(value: str) -> str:
 def _compact_match_text(value: str) -> str:
     """Normalize text so spaces, hyphens, and underscores compare equally."""
     return re.sub(r"[^a-z0-9]+", "", value.lower())
-
-
-def _as_list(value) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value if str(item).strip()]
-    return [str(value)] if str(value).strip() else []
 
 
 def _entry_match_texts(table: str, entry: dict) -> dict[str, list[str]]:
