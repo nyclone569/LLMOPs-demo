@@ -14,15 +14,158 @@ data:
       "tags": ["llmops", "overview"],
       "timezone": "browser",
       "schemaVersion": 38,
-      "version": 1,
+      "version": 2,
       "refresh": "30s",
-      "time": {"from": "now-1h", "to": "now"},
+      "time": {"from": "now-3h", "to": "now"},
       "panels": [
         {
           "id": 1,
+          "title": "Firing Alerts",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "background"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Request Rate",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_deployment_total_requests_total[5m]))",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps"}
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          }
+        },
+        {
+          "id": 3,
+          "title": "Error Rate",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(litellm_deployment_failure_responses_total[5m])) / sum(rate(litellm_deployment_total_requests_total[5m]))",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.01},
+                  {"color": "red", "value": 0.05}
+                ]
+              }
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "background"
+          }
+        },
+        {
+          "id": 4,
+          "title": "P95 Latency",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "background"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Daily Cost (USD)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_spend_metric_total[24h]))",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 2
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          }
+        },
+        {
+          "id": 6,
+          "title": "Daily Tokens",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(litellm_total_tokens_metric_total[24h]))",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "short"}
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          }
+        },
+        {
+          "id": 7,
           "title": "Request Rate (req/s)",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
           "targets": [
             {
               "expr": "sum(rate(litellm_deployment_total_requests_total[5m]))",
@@ -34,44 +177,10 @@ data:
           }
         },
         {
-          "id": 2,
-          "title": "Error Rate",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-          "targets": [
-            {
-              "expr": "sum(rate(litellm_deployment_failure_responses_total[5m])) / sum(rate(litellm_deployment_total_requests_total[5m]))",
-              "legendFormat": "Error Rate"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "percentunit", "max": 1}
-          }
-        },
-        {
-          "id": 3,
-          "title": "P95 Latency (s)",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
-              "legendFormat": "P95"
-            },
-            {
-              "expr": "histogram_quantile(0.50, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
-              "legendFormat": "P50"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "s"}
-          }
-        },
-        {
-          "id": 4,
+          "id": 8,
           "title": "Requests by Model",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
           "targets": [
             {
               "expr": "sum(rate(litellm_deployment_total_requests_total[5m])) by (litellm_model_name)",
@@ -83,25 +192,25 @@ data:
           }
         },
         {
-          "id": 5,
-          "title": "Requests by Provider",
+          "id": 9,
+          "title": "Error Rate",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
           "targets": [
             {
-              "expr": "sum(rate(litellm_deployment_total_requests_total[5m])) by (api_provider)",
-              "legendFormat": "{{ api_provider }}"
+              "expr": "sum(rate(litellm_deployment_failure_responses_total[5m])) / sum(rate(litellm_deployment_total_requests_total[5m]))",
+              "legendFormat": "Error Rate"
             }
           ],
           "fieldConfig": {
-            "defaults": {"unit": "reqps"}
+            "defaults": {"unit": "percentunit", "min": 0, "max": 1}
           }
         },
         {
-          "id": 6,
+          "id": 10,
           "title": "Provider Success Rate",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
           "targets": [
             {
               "expr": "sum(rate(litellm_deployment_success_responses_total[5m])) by (api_provider) / sum(rate(litellm_deployment_total_requests_total[5m])) by (api_provider)",
@@ -113,149 +222,174 @@ data:
           }
         },
         {
-          "id": 7,
-          "title": "Daily Token Usage",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 24},
-          "targets": [
-            {
-              "expr": "sum(increase(litellm_total_tokens_metric_total[24h]))",
-              "legendFormat": "Tokens (24h)"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "short"}
-          }
-        },
-        {
-          "id": 8,
-          "title": "Daily Cost (USD)",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 24},
-          "targets": [
-            {
-              "expr": "sum(increase(litellm_spend_metric_total[24h]))",
-              "legendFormat": "Cost (24h)"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "currencyUSD"}
-          }
-        },
-        {
-          "id": 9,
-          "title": "Redis Memory Usage",
-          "type": "gauge",
-          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 24},
-          "targets": [
-            {
-              "expr": "redis_memory_used_bytes / redis_memory_max_bytes",
-              "legendFormat": "Memory %"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "percentunit", "min": 0, "max": 1,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "yellow", "value": 0.7},
-                  {"color": "red", "value": 0.85}
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 10,
-          "title": "Open WebUI Ready Pods",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
-          "targets": [
-            {"expr": "sum(kube_pod_status_ready{namespace=\"open-webui\",condition=\"true\"})", "legendFormat": "ready"}
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
-          }
-        },
-        {
           "id": 11,
-          "title": "Langfuse Ready Pods",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28},
+          "title": "P50 / P95 Latency",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
           "targets": [
-            {"expr": "sum(kube_pod_status_ready{namespace=\"langfuse\",condition=\"true\"})", "legendFormat": "ready"}
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
+              "legendFormat": "P50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le))",
+              "legendFormat": "P95"
+            }
           ],
           "fieldConfig": {
-            "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
+            "defaults": {"unit": "s"}
           }
         },
         {
           "id": 12,
-          "title": "Pod CPU Usage",
+          "title": "Latency by Provider (P95)",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
           "targets": [
             {
-              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"litellm|langfuse|open-webui\", container!=\"\"}[5m])) by (namespace, pod)",
-              "legendFormat": "{{ namespace }}/{{ pod }}"
+              "expr": "histogram_quantile(0.95, sum(rate(litellm_request_total_latency_metric_bucket[5m])) by (le, api_provider))",
+              "legendFormat": "{{ api_provider }}"
             }
           ],
           "fieldConfig": {
-            "defaults": {"unit": "cores"}
+            "defaults": {"unit": "s"}
           }
         },
         {
           "id": 13,
-          "title": "PostgreSQL Connection Usage",
-          "type": "gauge",
-          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 36},
-          "targets": [
+          "title": "Infrastructure",
+          "type": "row",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 28},
+          "collapsed": true,
+          "panels": [
             {
-              "expr": "sum(pg_stat_activity_count) / sum(pg_settings_max_connections)",
-              "legendFormat": "conn %"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "yellow", "value": 0.6},
-                  {"color": "red", "value": 0.8}
-                ]
+              "id": 14,
+              "title": "Open WebUI Ready Pods",
+              "type": "stat",
+              "gridPos": {"h": 4, "w": 6, "x": 0, "y": 29},
+              "targets": [
+                {
+                  "expr": "sum(kube_deployment_status_replicas_ready{namespace=\"open-webui\"})",
+                  "legendFormat": ""
+                }
+              ],
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "red", "value": null},
+                      {"color": "green", "value": 1}
+                    ]
+                  }
+                }
+              },
+              "options": {
+                "reduceOptions": {"calcs": ["lastNotNull"]},
+                "colorMode": "background"
+              }
+            },
+            {
+              "id": 15,
+              "title": "Langfuse Ready Pods",
+              "type": "stat",
+              "gridPos": {"h": 4, "w": 6, "x": 6, "y": 29},
+              "targets": [
+                {
+                  "expr": "sum(kube_deployment_status_replicas_ready{namespace=\"langfuse\"})",
+                  "legendFormat": ""
+                }
+              ],
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "red", "value": null},
+                      {"color": "green", "value": 1}
+                    ]
+                  }
+                }
+              },
+              "options": {
+                "reduceOptions": {"calcs": ["lastNotNull"]},
+                "colorMode": "background"
+              }
+            },
+            {
+              "id": 16,
+              "title": "Langfuse Queue Depth",
+              "type": "stat",
+              "gridPos": {"h": 4, "w": 6, "x": 0, "y": 33},
+              "targets": [
+                {
+                  "expr": "sum(redis_key_size{key=~\"bull:langfuse-new-events:.*\"})",
+                  "legendFormat": ""
+                }
+              ],
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "green", "value": null},
+                      {"color": "yellow", "value": 100},
+                      {"color": "red", "value": 500}
+                    ]
+                  }
+                }
+              },
+              "options": {
+                "reduceOptions": {"calcs": ["lastNotNull"]},
+                "colorMode": "background"
+              }
+            },
+            {
+              "id": 17,
+              "title": "PostgreSQL Connection Usage",
+              "type": "gauge",
+              "gridPos": {"h": 4, "w": 6, "x": 6, "y": 33},
+              "targets": [
+                {
+                  "expr": "sum(pg_stat_activity_count) / sum(pg_settings_max_connections)",
+                  "legendFormat": ""
+                }
+              ],
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percentunit",
+                  "min": 0,
+                  "max": 1,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "green", "value": null},
+                      {"color": "yellow", "value": 0.6},
+                      {"color": "red", "value": 0.8}
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "id": 18,
+              "title": "Pod CPU Usage",
+              "type": "timeseries",
+              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 29},
+              "targets": [
+                {
+                  "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"litellm|langfuse|open-webui\",container!=\"\"}[5m])) by (namespace, pod)",
+                  "legendFormat": "{{ namespace }}/{{ pod }}"
+                }
+              ],
+              "fieldConfig": {
+                "defaults": {"unit": "cores"}
               }
             }
-          }
-        },
-        {
-          "id": 14,
-          "title": "Langfuse Queue Depth",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 36},
-          "targets": [
-            {
-              "expr": "sum(redis_key_size{key=~\"bull:langfuse-new-events:.*\"})",
-              "legendFormat": "queue items"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "yellow", "value": 100},
-                  {"color": "red", "value": 500}
-                ]
-              }
-            }
-          }
+          ]
         }
       ]
     }
