@@ -53,13 +53,22 @@ kubectl annotate externalsecret llmops-apikeys-secret -n postgresql \
   force-sync=$(date +%s) --overwrite
 ```
 
-### Step 1: Create the monitoring user — one-shot Job
+### Step 1: Fix ArgoCD app include filter
+
+Modify `argocd/apps/postgresql.yaml` — change the `include` filter so ArgoCD picks up the new Job file:
+
+```yaml
+# was: include: "postgresql.yaml"
+include: "postgresql*.yaml"
+```
+
+Without this change, `postgresql-exporter-user-job.yaml` is ignored by ArgoCD and the monitoring user is never created.
+
+### Step 2: Create the monitoring user — one-shot Job
 
 New file: `argocd/manifests/postgresql-exporter-user-job.yaml`
 
 Since the initdb scripts only run on first pod creation and PostgreSQL already has data, a Job creates the monitoring role against the live instance.
-
-**Important:** The ArgoCD `postgresql` Application sources manifests with `include: "postgresql.yaml"` — it will not pick up the new Job file automatically. The `include` filter in `argocd/apps/postgresql.yaml` must be changed to `include: "postgresql*.yaml"` to include both files.
 
 ```yaml
 apiVersion: batch/v1
@@ -69,8 +78,10 @@ metadata:
   namespace: postgresql
   annotations:
     argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
 spec:
+  activeDeadlineSeconds: 120
+  backoffLimit: 5
   template:
     spec:
       restartPolicy: OnFailure
@@ -80,6 +91,10 @@ spec:
           command: [bash, -c]
           args:
             - |
+              until pg_isready -h postgresql-primary -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 3
+              done
               PGPASSWORD=$POSTGRESQL_PASSWORD psql \
                 -h postgresql-primary \
                 -U postgres \
@@ -106,9 +121,13 @@ spec:
             limits: {cpu: 100m, memory: 128Mi}
 ```
 
-Using `argocd.argoproj.io/hook: PostSync` — ArgoCD runs this after the sync wave, once the StatefulSet is ready. `HookSucceeded` deletes the Job pod after it completes successfully. The `IF NOT EXISTS` guard makes it idempotent on re-runs.
+**Delete policy:** `HookSucceeded,BeforeHookCreation` — `HookSucceeded` cleans up after success; `BeforeHookCreation` deletes any leftover Job from a previous failed run before creating a new one. Without `BeforeHookCreation`, a failed Job would block subsequent syncs with an "already exists" error.
 
-### Step 2: Add postgres_exporter sidecar to the StatefulSet
+**Readiness wait:** `pg_isready` loop guards against the window between ArgoCD declaring the StatefulSet healthy and PostgreSQL actually accepting TCP connections. Bounded by `activeDeadlineSeconds: 120`.
+
+**Idempotency:** The `IF NOT EXISTS` guard makes repeated runs safe.
+
+### Step 3: Add postgres_exporter sidecar to the StatefulSet
 
 Modify `argocd/manifests/postgresql.yaml` — add a second container to the StatefulSet pod spec:
 
@@ -133,8 +152,6 @@ Modify `argocd/manifests/postgresql.yaml` — add a second container to the Stat
         secretKeyRef:
           name: llmops-apikeys-secret
           key: POSTGRES_EXPORTER_PASSWORD
-    - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
-      value: "true"
   ports:
     - name: metrics
       containerPort: 9187
@@ -161,7 +178,7 @@ Modify `argocd/manifests/postgresql.yaml` — add a second container to the Stat
 
 The sidecar connects via `localhost` (shared pod network). Bitnami runs as UID 1001; the exporter runs as UID 65534 — no conflict.
 
-### Step 3: Add metrics port to the Service
+### Step 4: Add metrics port to the Service
 
 Modify the `postgresql-primary` Service in `argocd/manifests/postgresql.yaml`:
 
@@ -175,7 +192,7 @@ ports:
     targetPort: 9187
 ```
 
-### Step 4: Fix the ServiceMonitor
+### Step 5: Fix the ServiceMonitor
 
 Modify `argocd/monitoring/service-monitors.yaml` — fix the `postgresql` ServiceMonitor:
 
@@ -193,7 +210,7 @@ spec:
       path: /metrics
 ```
 
-### Step 5: Revert postgresql-values.yaml
+### Step 6: Revert postgresql-values.yaml
 
 Revert the no-op ServiceMonitor change made to `argocd/helm-values/postgresql-values.yaml` (the file is unused by ArgoCD for this deployment — leaving it with `enabled: true` is misleading).
 
@@ -222,6 +239,7 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:909
 
 | File | Change |
 |---|---|
+| `argocd/apps/postgresql.yaml` | Change `include` filter to `postgresql*.yaml` |
 | `argocd/manifests/postgresql-exporter-user-job.yaml` | New — PostSync Job to create `exporter` user |
 | `argocd/manifests/postgresql.yaml` | Add sidecar container + metrics port to Service |
 | `argocd/monitoring/service-monitors.yaml` | Fix ServiceMonitor label selector |
