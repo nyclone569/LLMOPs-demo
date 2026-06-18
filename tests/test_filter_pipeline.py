@@ -596,6 +596,53 @@ async def test_stream_summary_yields_tokens():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_stream_analytics_exact_alias_does_not_return_low_confidence_message():
+    from filter_analytics import _stream_analytics
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["kpi zone net flow"],
+            "example_questions": [],
+        }
+    }
+
+    async def fake_summary(*args, **kwargs):
+        yield "The table has one matching row."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_query", return_value={
+             "sql": "SELECT net_flow FROM kpi_zone_net_flow",
+             "rows": [{"net_flow": 5}],
+             "capped": False,
+         }), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "table", "x": "net_flow", "y": "net_flow"}), \
+         patch("filter_analytics._persist_html_artifact", return_value='<file type="html" id="table-id">'), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics(
+            "Show me table kpi zone net flow",
+            "bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    assert "confidence: high" in response
+    assert "I wasn't confident" not in response
+    assert "SELECT net_flow FROM kpi_zone_net_flow" in response
+
+
+@pytest.mark.asyncio
 async def test_stream_analytics_multiple_exact_matches_uses_candidate_supervisor():
     from filter_analytics import _stream_analytics
 
