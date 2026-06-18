@@ -902,6 +902,122 @@ def _registry_as_prompt(registry: dict) -> str:
     return "\n".join(lines)
 
 
+EXACT_CANDIDATE_SCORE = 1000
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalize natural-language and schema labels for lexical matching."""
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _compact_match_text(value: str) -> str:
+    """Normalize text so spaces, hyphens, and underscores compare equally."""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)] if str(value).strip() else []
+
+
+def _entry_match_texts(table: str, entry: dict) -> dict[str, list[str]]:
+    columns = [column.get("name", "") for column in entry.get("columns", [])]
+    return {
+        "table_words": _normalize_match_text(table).split(),
+        "aliases": _as_list(entry.get("aliases")),
+        "columns": columns,
+        "dimensions": _as_list(entry.get("dimensions")),
+        "measures": _as_list(entry.get("measures")),
+        "use_for": _as_list(entry.get("use_for")),
+        "examples": _as_list(entry.get("example_questions")),
+        "description": _as_list(entry.get("description")),
+    }
+
+
+def _score_candidate(question: str, table: str, entry: dict) -> tuple[int, list[str]]:
+    question_norm = _normalize_match_text(question)
+    question_words = set(question_norm.split())
+    texts = _entry_match_texts(table, entry)
+    score = 0
+    reasons: list[str] = []
+
+    table_word_hits = [word for word in texts["table_words"] if word in question_words]
+    if table_word_hits:
+        score += 20 * len(table_word_hits)
+        reasons.append("table words matched: " + ", ".join(table_word_hits))
+
+    for field, weight in (
+        ("aliases", 80),
+        ("columns", 25),
+        ("dimensions", 25),
+        ("measures", 30),
+        ("use_for", 35),
+        ("examples", 25),
+        ("description", 10),
+    ):
+        for text in texts[field]:
+            text_norm = _normalize_match_text(text)
+            if not text_norm:
+                continue
+            text_words = set(text_norm.split())
+            overlap = sorted(question_words & text_words)
+            if text_norm in question_norm:
+                score += weight
+                reasons.append(f"{field} phrase matched: {text}")
+            elif overlap:
+                score += min(weight, 8 * len(overlap))
+                reasons.append(f"{field} words matched: {', '.join(overlap)}")
+
+    return score, reasons
+
+
+def _select_table_candidates(question: str, registry: dict, limit: int = 8) -> list[dict]:
+    """Return likely table candidates before calling the LLM supervisor."""
+    question_compact = _compact_match_text(question)
+    exact_matches = []
+
+    for table, entry in registry.items():
+        table_label = table.replace("_", " ")
+        if _compact_match_text(table_label) in question_compact:
+            exact_matches.append({
+                "table": table,
+                "score": EXACT_CANDIDATE_SCORE,
+                "match_type": "exact_table_name",
+                "reasons": ["normalized table name matched"],
+            })
+            continue
+
+        for alias in _as_list(entry.get("aliases")):
+            alias_compact = _compact_match_text(alias)
+            if alias_compact and alias_compact in question_compact:
+                exact_matches.append({
+                    "table": table,
+                    "score": EXACT_CANDIDATE_SCORE - 10,
+                    "match_type": "exact_alias",
+                    "reasons": [f"alias matched: {alias}"],
+                })
+                break
+
+    if exact_matches:
+        return sorted(exact_matches, key=lambda item: item["score"], reverse=True)[:limit]
+
+    scored = []
+    for table, entry in registry.items():
+        score, reasons = _score_candidate(question, table, entry)
+        if score > 0:
+            scored.append({
+                "table": table,
+                "score": score,
+                "match_type": "lexical_score",
+                "reasons": reasons[:5],
+            })
+
+    return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
+
+
 def _run_supervisor(
     question: str,
     registry: dict,

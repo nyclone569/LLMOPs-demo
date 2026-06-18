@@ -41,6 +41,102 @@ _SAMPLE_REGISTRY = {
 }
 
 
+def test_select_table_candidates_exact_normalized_table_name():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+        "kpi_daily_overview": {
+            "description": "Daily revenue and trips",
+            "tier": "kpi",
+            "columns": [{"name": "pickup_date", "type": "date32[day]"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+    }
+
+    candidates = _select_table_candidates("Show me table kpi zone net flow", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["match_type"] == "exact_table_name"
+    assert candidates[0]["score"] >= 1000
+    assert "normalized table name matched" in candidates[0]["reasons"]
+
+
+def test_select_table_candidates_exact_alias_match():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["zone inflow outflow"],
+            "example_questions": [],
+        }
+    }
+
+    candidates = _select_table_candidates("show me zone inflow outflow", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["match_type"] == "exact_alias"
+    assert "alias matched: zone inflow outflow" in candidates[0]["reasons"]
+
+
+def test_select_table_candidates_scores_metadata_and_columns():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}, {"name": "borough", "type": "string"}],
+            "aliases": ["zone net flow"],
+            "measures": ["net_flow", "imbalance_score"],
+            "dimensions": ["zone", "borough"],
+            "use_for": ["zone pickup dropoff imbalance"],
+            "example_questions": [],
+        },
+        "kpi_monthly_summary": {
+            "description": "Monthly revenue trend",
+            "tier": "kpi",
+            "columns": [{"name": "pickup_month", "type": "int32"}],
+            "aliases": [],
+            "measures": ["total_revenue"],
+            "dimensions": ["pickup_month"],
+            "use_for": ["monthly trends"],
+            "example_questions": [],
+        },
+    }
+
+    candidates = _select_table_candidates("which zone has the largest pickup dropoff imbalance", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["score"] > candidates[1]["score"]
+
+
+def test_select_table_candidates_returns_empty_for_no_signal():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        }
+    }
+
+    assert _select_table_candidates("explain linked lists", registry) == []
+
+
 def test_strip_fences_removes_sql_block():
     assert _strip_fences("```sql\nSELECT 1\n```") == "SELECT 1"
 
