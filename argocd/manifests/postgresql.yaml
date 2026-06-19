@@ -136,6 +136,8 @@ kind: Service
 metadata:
   name: postgresql-primary
   namespace: postgresql
+  labels:
+    app: postgresql-primary
 spec:
   selector:
     app: postgresql-primary
