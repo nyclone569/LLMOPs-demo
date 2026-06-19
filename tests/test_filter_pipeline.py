@@ -41,6 +41,186 @@ _SAMPLE_REGISTRY = {
 }
 
 
+def test_select_table_candidates_exact_normalized_table_name():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+        "kpi_daily_overview": {
+            "description": "Daily revenue and trips",
+            "tier": "kpi",
+            "columns": [{"name": "pickup_date", "type": "date32[day]"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+    }
+
+    candidates = _select_table_candidates("Show me table kpi zone net flow", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["match_type"] == "exact_table_name"
+    assert candidates[0]["score"] >= 1000
+    assert "normalized table name matched" in candidates[0]["reasons"]
+
+
+def test_select_table_candidates_exact_alias_match():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["zone inflow outflow"],
+            "example_questions": [],
+        }
+    }
+
+    candidates = _select_table_candidates("show me zone inflow outflow", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["match_type"] == "exact_alias"
+    assert "alias matched: zone inflow outflow" in candidates[0]["reasons"]
+
+
+def test_select_table_candidates_scores_metadata_and_columns():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}, {"name": "borough", "type": "string"}],
+            "aliases": ["zone net flow"],
+            "measures": ["net_flow", "imbalance_score"],
+            "dimensions": ["zone", "borough"],
+            "use_for": ["zone pickup dropoff imbalance"],
+            "example_questions": [],
+        },
+        "kpi_monthly_summary": {
+            "description": "Monthly revenue trend",
+            "tier": "kpi",
+            "columns": [{"name": "pickup_month", "type": "int32"}],
+            "aliases": [],
+            "measures": ["total_revenue"],
+            "dimensions": ["pickup_month"],
+            "use_for": ["monthly trends"],
+            "example_questions": [],
+        },
+    }
+
+    candidates = _select_table_candidates("which zone has the largest pickup dropoff imbalance", registry)
+
+    assert candidates[0]["table"] == "kpi_zone_net_flow"
+    assert candidates[0]["score"] > candidates[1]["score"]
+
+
+def test_select_table_candidates_returns_empty_for_no_signal():
+    from filter_analytics import _select_table_candidates
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        }
+    }
+
+    assert _select_table_candidates("explain linked lists", registry) == []
+
+
+def test_registry_as_prompt_includes_optional_metadata():
+    from filter_analytics import _registry_as_prompt
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["kpi zone net flow", "zone net flow"],
+            "grain": "one row per taxi zone",
+            "dimensions": ["zone", "borough"],
+            "measures": ["net_flow", "imbalance_score"],
+            "date_columns": [],
+            "use_for": ["zone pickup/dropoff imbalance"],
+            "avoid_for": ["daily trends because this table has no date column"],
+            "example_questions": ["show table kpi zone net flow"],
+        }
+    }
+
+    prompt = _registry_as_prompt(registry)
+
+    assert "aliases: kpi zone net flow; zone net flow" in prompt
+    assert "grain: one row per taxi zone" in prompt
+    assert "dimensions: zone, borough" in prompt
+    assert "measures: net_flow, imbalance_score" in prompt
+    assert "date_columns: none" in prompt
+    assert "use_for: zone pickup/dropoff imbalance" in prompt
+    assert "avoid_for: daily trends because this table has no date column" in prompt
+    assert "examples: show table kpi zone net flow" in prompt
+
+
+def test_registry_as_prompt_supports_old_minimal_entries():
+    from filter_analytics import _registry_as_prompt
+
+    registry = {
+        "kpi_monthly_summary": {
+            "description": "Monthly summary",
+            "tier": "kpi",
+            "columns": [{"name": "total_revenue", "type": "double"}],
+            "example_questions": [],
+        }
+    }
+
+    prompt = _registry_as_prompt(registry)
+
+    assert "kpi_monthly_summary" in prompt
+    assert "total_revenue(double)" in prompt
+    assert "aliases:" not in prompt
+    assert "date_columns:" not in prompt
+
+
+def test_run_supervisor_can_receive_candidate_registry_only():
+    from filter_analytics import _run_supervisor
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["zone net flow"],
+            "example_questions": [],
+        }
+    }
+
+    captured_messages = {}
+
+    def fake_llm(messages, model, litellm_url, api_key=""):
+        captured_messages["user"] = messages[1]["content"]
+        return '{"table": "kpi_zone_net_flow", "confidence": "high", "reasoning": "best candidate"}'
+
+    with patch("filter_analytics._llm_chat", side_effect=fake_llm):
+        result = _run_supervisor(
+            "which zone has the largest net flow",
+            registry,
+            "http://litellm",
+            "private-chat",
+            "",
+        )
+
+    assert result["table"] == "kpi_zone_net_flow"
+    assert "kpi_zone_net_flow" in captured_messages["user"]
+    assert "Available tables:" in captured_messages["user"]
+
+
 def test_strip_fences_removes_sql_block():
     assert _strip_fences("```sql\nSELECT 1\n```") == "SELECT 1"
 
@@ -414,6 +594,175 @@ async def test_stream_summary_yields_tokens():
 # ---------------------------------------------------------------------------
 # _stream_analytics tests
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stream_analytics_exact_alias_does_not_return_low_confidence_message():
+    from filter_analytics import _stream_analytics
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["kpi zone net flow"],
+            "example_questions": [],
+        }
+    }
+
+    async def fake_summary(*args, **kwargs):
+        yield "The table has one matching row."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_query", return_value={
+             "sql": "SELECT net_flow FROM kpi_zone_net_flow",
+             "rows": [{"net_flow": 5}],
+             "capped": False,
+         }), \
+         patch("filter_analytics._run_chart_spec", return_value={"type": "table", "x": "net_flow", "y": "net_flow"}), \
+         patch("filter_analytics._persist_html_artifact", return_value='<file type="html" id="table-id">'), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics(
+            "Show me table kpi zone net flow",
+            "bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    assert "confidence: high" in response
+    assert "I wasn't confident" not in response
+    assert "SELECT net_flow FROM kpi_zone_net_flow" in response
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_multiple_exact_matches_uses_candidate_supervisor():
+    from filter_analytics import _stream_analytics
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+        "kpi_zone_performance": {
+            "description": "Zone-level performance metrics",
+            "tier": "kpi",
+            "columns": [{"name": "pickups", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+        "kpi_monthly_summary": {
+            "description": "Monthly revenue trend",
+            "tier": "kpi",
+            "columns": [{"name": "total_revenue", "type": "double"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+    }
+
+    async def fake_summary(*args, **kwargs):
+        yield "Zone performance is available."
+
+    captured_registry = {}
+
+    def fake_supervisor(question, prompt_registry, litellm_url, litellm_model, api_key):
+        captured_registry.update(prompt_registry)
+        return {
+            "table": "kpi_zone_performance",
+            "confidence": "high",
+            "reasoning": "multiple exact matches required supervisor choice",
+        }
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", side_effect=fake_supervisor) as mock_supervisor, \
+         patch("filter_analytics._run_query", return_value={
+             "sql": "SELECT pickups FROM kpi_zone_performance",
+             "rows": [{"pickups": 10}],
+             "capped": False,
+         }), \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics(
+            "compare kpi zone performance and kpi zone net flow",
+            "bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    mock_supervisor.assert_called_once()
+    assert set(captured_registry) == {"kpi_zone_net_flow", "kpi_zone_performance"}
+    assert "kpi_monthly_summary" not in captured_registry
+    assert "**Table:** `kpi_zone_performance`" in "".join(chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_exact_table_match_skips_supervisor_llm():
+    from filter_analytics import _stream_analytics
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "aliases": ["kpi zone net flow"],
+            "example_questions": [],
+        }
+    }
+
+    query_result = {
+        "sql": "SELECT net_flow FROM kpi_zone_net_flow",
+        "rows": [{"net_flow": 10}],
+        "capped": False,
+    }
+
+    async def fake_summary(*args, **kwargs):
+        yield "Net flow is available."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._llm_chat") as mock_llm_chat, \
+         patch("filter_analytics._run_query", return_value=query_result), \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics(
+            "Show me table kpi zone net flow",
+            "bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    mock_llm_chat.assert_not_called()
+    assert "**Table:** `kpi_zone_net_flow`" in response
+    assert "confidence: high" in response
+    assert "normalized table name matched" in response
+    assert "I wasn't confident" not in response
+
 
 @pytest.mark.asyncio
 async def test_stream_analytics_yields_reasoning_trace_and_summary():

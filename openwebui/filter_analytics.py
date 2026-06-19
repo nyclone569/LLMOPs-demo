@@ -891,15 +891,176 @@ Select ONE table. Output ONLY valid JSON, no explanation:
 {"table": "<table_name>", "confidence": "high|low", "reasoning": "<one sentence>"}"""
 
 
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)] if str(value).strip() else []
+
+
+def _format_prompt_list(
+    label: str,
+    values: list[str],
+    none_label: str | None = None,
+    separator: str = "; ",
+) -> str | None:
+    if values:
+        return f"{label}: " + separator.join(values)
+    if none_label is not None:
+        return f"{label}: {none_label}"
+    return None
+
+
 def _registry_as_prompt(registry: dict) -> str:
     lines = []
     for table, entry in registry.items():
         col_list = ", ".join(f"{c['name']}({c['type']})" for c in entry["columns"])
-        examples = "; ".join(entry.get("example_questions", []))
-        lines.append(
-            f"- {table} [{entry['tier']}]: {entry['description']} | columns: {col_list} | examples: {examples}"
-        )
+        parts = [
+            f"- {table} [{entry['tier']}]: {entry['description']}",
+        ]
+
+        metadata_parts = [
+            _format_prompt_list("aliases", _as_list(entry.get("aliases"))),
+            f"grain: {entry['grain']}" if entry.get("grain") else None,
+            _format_prompt_list("dimensions", _as_list(entry.get("dimensions")), separator=", "),
+            _format_prompt_list("measures", _as_list(entry.get("measures")), separator=", "),
+            _format_prompt_list("date_columns", _as_list(entry.get("date_columns")), none_label="none")
+            if "date_columns" in entry
+            else None,
+            _format_prompt_list("use_for", _as_list(entry.get("use_for"))),
+            _format_prompt_list("avoid_for", _as_list(entry.get("avoid_for"))),
+            _format_prompt_list("examples", _as_list(entry.get("example_questions"))),
+            f"columns: {col_list}",
+        ]
+        parts.extend(part for part in metadata_parts if part)
+        lines.append(" | ".join(parts))
     return "\n".join(lines)
+
+
+EXACT_CANDIDATE_SCORE = 1000
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalize natural-language and schema labels for lexical matching."""
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _compact_match_text(value: str) -> str:
+    """Normalize text so spaces, hyphens, and underscores compare equally."""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _entry_match_texts(table: str, entry: dict) -> dict[str, list[str]]:
+    columns = [column.get("name", "") for column in entry.get("columns", [])]
+    return {
+        "table_words": _normalize_match_text(table).split(),
+        "aliases": _as_list(entry.get("aliases")),
+        "columns": columns,
+        "dimensions": _as_list(entry.get("dimensions")),
+        "measures": _as_list(entry.get("measures")),
+        "use_for": _as_list(entry.get("use_for")),
+        "examples": _as_list(entry.get("example_questions")),
+        "description": _as_list(entry.get("description")),
+    }
+
+
+def _score_candidate(question: str, table: str, entry: dict) -> tuple[int, list[str]]:
+    question_norm = _normalize_match_text(question)
+    question_words = set(question_norm.split())
+    texts = _entry_match_texts(table, entry)
+    score = 0
+    reasons: list[str] = []
+
+    table_word_hits = [word for word in texts["table_words"] if word in question_words]
+    if table_word_hits:
+        score += 20 * len(table_word_hits)
+        reasons.append("table words matched: " + ", ".join(table_word_hits))
+
+    for field, weight in (
+        ("aliases", 80),
+        ("columns", 25),
+        ("dimensions", 25),
+        ("measures", 30),
+        ("use_for", 35),
+        ("examples", 25),
+        ("description", 10),
+    ):
+        for text in texts[field]:
+            text_norm = _normalize_match_text(text)
+            if not text_norm:
+                continue
+            text_words = set(text_norm.split())
+            overlap = sorted(question_words & text_words)
+            if text_norm in question_norm:
+                score += weight
+                reasons.append(f"{field} phrase matched: {text}")
+            elif overlap:
+                score += min(weight, 8 * len(overlap))
+                reasons.append(f"{field} words matched: {', '.join(overlap)}")
+
+    return score, reasons
+
+
+def _select_table_candidates(question: str, registry: dict, limit: int = 8) -> list[dict]:
+    """Return likely table candidates before calling the LLM supervisor."""
+    question_compact = _compact_match_text(question)
+    exact_matches = []
+
+    for table, entry in registry.items():
+        table_label = table.replace("_", " ")
+        if _compact_match_text(table_label) in question_compact:
+            exact_matches.append({
+                "table": table,
+                "score": EXACT_CANDIDATE_SCORE,
+                "match_type": "exact_table_name",
+                "reasons": ["normalized table name matched"],
+            })
+            continue
+
+        for alias in _as_list(entry.get("aliases")):
+            alias_compact = _compact_match_text(alias)
+            if alias_compact and alias_compact in question_compact:
+                exact_matches.append({
+                    "table": table,
+                    "score": EXACT_CANDIDATE_SCORE - 10,
+                    "match_type": "exact_alias",
+                    "reasons": [f"alias matched: {alias}"],
+                })
+                break
+
+    if exact_matches:
+        return sorted(exact_matches, key=lambda item: item["score"], reverse=True)[:limit]
+
+    scored = []
+    for table, entry in registry.items():
+        score, reasons = _score_candidate(question, table, entry)
+        if score > 0:
+            scored.append({
+                "table": table,
+                "score": score,
+                "match_type": "lexical_score",
+                "reasons": reasons[:5],
+            })
+
+    return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
+
+
+def _candidate_registry(registry: dict, candidates: list[dict]) -> dict:
+    return {
+        candidate["table"]: registry[candidate["table"]]
+        for candidate in candidates
+        if candidate.get("table") in registry
+    }
+
+
+def _supervisor_from_exact_candidate(candidate: dict) -> dict:
+    reason = "; ".join(candidate.get("reasons", [])) or "exact table match"
+    return {
+        "table": candidate["table"],
+        "confidence": "high",
+        "reasoning": reason,
+    }
 
 
 def _run_supervisor(
@@ -1248,8 +1409,21 @@ async def _stream_analytics(
 
     if emitter:
         await emitter({"type": "status", "data": {"description": "Selecting table from registry...", "done": False}})
+
+    candidates: list[dict] = []
     try:
-        supervisor = _run_supervisor(question, registry, litellm_url, litellm_model, api_key)
+        candidates = _select_table_candidates(question, registry)
+        exact_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.get("match_type") in {"exact_table_name", "exact_alias"}
+        ]
+        if len(exact_candidates) == 1:
+            supervisor = _supervisor_from_exact_candidate(exact_candidates[0])
+        else:
+            prompt_candidates = exact_candidates or candidates
+            prompt_registry = _candidate_registry(registry, prompt_candidates) if prompt_candidates else registry
+            supervisor = _run_supervisor(question, prompt_registry, litellm_url, litellm_model, api_key)
     except Exception as e:
         yield f"> **Error:** Table selection failed — {e}\n"
         if emitter:
