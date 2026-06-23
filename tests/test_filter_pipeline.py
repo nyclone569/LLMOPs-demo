@@ -12,7 +12,9 @@ from filter_analytics import (
     _split_plan_and_sql,
     _wrap_with_limit,
     _retry_prompt,
+    _run_query,
     _validate_sql,
+    QueryGenerationError,
     SQLValidationError,
     build_html_artifact,
     chart_spec_to_vegalite,
@@ -306,6 +308,25 @@ def test_split_plan_and_sql_ignores_mid_sentence_sql_colon():
     assert sql == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
 
 
+def test_split_plan_and_sql_handles_inline_sql_label_without_newline():
+    """Regression: the model sometimes writes the PLAN paragraph and the
+    `SQL:` label on the same line (no leading newline). The split must still
+    extract the SELECT — otherwise the entire blob fails validation with
+    'SQL must start with SELECT or WITH'.
+    """
+    plan, sql = _split_plan_and_sql(
+        "PLAN: route_top_pickup_zones is pre-aggregated at zone grain. "
+        "I'll keep pickup_borough so the chart agent can group it downstream. "
+        "SQL: SELECT pickup_zone, pickup_borough, revenue "
+        "FROM route_top_pickup_zones GROUP BY pickup_zone, pickup_borough, "
+        "revenue ORDER BY revenue DESC LIMIT 20"
+    )
+
+    assert plan.startswith("route_top_pickup_zones is pre-aggregated")
+    assert sql.startswith("SELECT pickup_zone, pickup_borough, revenue")
+    assert sql.endswith("ORDER BY revenue DESC LIMIT 20")
+
+
 def test_split_plan_and_sql_is_case_insensitive():
     plan, sql = _split_plan_and_sql(
         "plan: The table is already at pickup-zone grain.\n"
@@ -514,9 +535,12 @@ def test_run_query_raises_after_two_duckdb_failures():
              duckdb.BinderException("second binder failure"),
          ]):
         mock_build.return_value = MagicMock()
-        with pytest.raises(duckdb.Error, match="second binder failure"):
+        with pytest.raises(QueryGenerationError) as exc_info:
             _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
 
+    assert isinstance(exc_info.value.original, duckdb.Error)
+    assert "second binder failure" in str(exc_info.value.original)
+    assert exc_info.value.attempts == 2
     assert mock_llm.call_count == 2
 
 
@@ -531,11 +555,36 @@ def test_run_query_validator_then_duckdb_error_in_one_session():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", side_effect=duckdb.BinderException("binder after validation")) as mock_execute:
         mock_build.return_value = MagicMock()
-        with pytest.raises(duckdb.Error, match="binder after validation"):
+        with pytest.raises(QueryGenerationError) as exc_info:
             _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
 
+    assert isinstance(exc_info.value.original, duckdb.Error)
+    assert "binder after validation" in str(exc_info.value.original)
     assert mock_llm.call_count == 2
     assert mock_execute.call_count == 1
+
+
+def test_run_query_error_carries_last_plan_sql_and_raw():
+    """QueryGenerationError must expose the last attempt's raw/plan/sql so the
+    UI can render what the model produced when self-repair exhausts attempts.
+    """
+    bogus_first = "PLAN: I will list the columns.\nSQL:\nHere is a description, not SQL."
+    bogus_second = "PLAN: Sorry, I cannot generate SQL.\nSQL:\nNo query is possible here."
+
+    with patch("filter_analytics._llm_chat", side_effect=[bogus_first, bogus_second]), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql") as mock_execute:
+        mock_build.return_value = MagicMock()
+        with pytest.raises(QueryGenerationError) as exc_info:
+            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    err = exc_info.value
+    assert isinstance(err.original, SQLValidationError)
+    assert err.attempts == 2
+    assert err.plan == "Sorry, I cannot generate SQL."
+    assert err.sql == "No query is possible here."
+    assert "Sorry, I cannot generate SQL" in err.raw
+    mock_execute.assert_not_called()
 
 
 def test_run_query_extracts_plan_and_sql():
@@ -1314,6 +1363,68 @@ async def test_stream_analytics_pickup_borough_regression():
     assert "SELECT pickup_zone, pickup_borough, revenue" in response
     assert "GROUP BY pickup_borough" not in response
     assert response.index("> **Table:**") < response.index("> **Plan:**") < response.index("> **SQL:**")
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_renders_last_sql_and_plan_on_query_generation_error():
+    """When self-repair exhausts attempts on a non-SELECT model response, the
+    stream must surface the last plan AND the last SQL chunk so the user can
+    see what the model actually produced — not just the validator message.
+    """
+    registry = {
+        "route_top_pickup_zones": {
+            "tier": "route",
+            "description": "Top pickup zones",
+            "columns": [
+                {"name": "pickup_zone", "type": "string"},
+                {"name": "revenue", "type": "double"},
+            ],
+            "example_questions": [],
+            "aliases": ["top pickup zones"],
+        }
+    }
+    # Both attempts produce prose where SQL should be — validator rejects both.
+    bogus_first = (
+        "PLAN: I'll describe the data.\n"
+        "SQL:\nHere are the top zones: Midtown leads, followed by JFK and LaGuardia."
+    )
+    bogus_second = (
+        "PLAN: I cannot write the SQL right now.\n"
+        "SQL:\nI apologize — please ask in plain English instead."
+    )
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={
+             "table": "route_top_pickup_zones",
+             "confidence": "high",
+             "reasoning": "pickup zone leaderboard",
+         }), \
+         patch("filter_analytics._llm_chat", side_effect=[bogus_first, bogus_second]), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql") as mock_execute:
+        mock_build.return_value = MagicMock()
+        chunks: list[str] = []
+        async for chunk in _stream_analytics(
+            "top 20 pickup zones by revenue",
+            "analytics-bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    assert "> **Error:** SQL must start with SELECT or WITH (after 2 attempts)" in response
+    assert "> **Plan from last attempt:** I cannot write the SQL right now." in response
+    assert "> **SQL from last attempt:**" in response
+    assert "I apologize — please ask in plain English instead." in response
+    assert "```sql" in response
+    mock_execute.assert_not_called()
 
 
 @pytest.mark.asyncio

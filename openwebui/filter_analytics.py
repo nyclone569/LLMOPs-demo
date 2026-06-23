@@ -201,6 +201,31 @@ class SQLValidationError(Exception):
     pass
 
 
+class QueryGenerationError(Exception):
+    """Raised when _run_query exhausts its self-repair budget.
+
+    Carries the last raw LLM output, parsed plan, and SQL chunk so
+    `_stream_analytics` can render them — otherwise the user sees only the
+    validator/DuckDB message ("SQL must start with SELECT or WITH") with no
+    visibility into what the model actually produced.
+    """
+
+    def __init__(
+        self,
+        original: Exception,
+        plan: str,
+        sql: str,
+        raw: str,
+        attempts: int,
+    ) -> None:
+        self.original = original
+        self.plan = plan
+        self.sql = sql
+        self.raw = raw
+        self.attempts = attempts
+        super().__init__(str(original))
+
+
 def _strip_fences(text: str) -> str:
     text = text.strip()
     match = re.match(r"^```(?:sql)?\s*\n?(.*?)\n?```$", text, re.DOTALL)
@@ -208,12 +233,24 @@ def _strip_fences(text: str) -> str:
 
 
 def _split_plan_and_sql(text: str) -> tuple[str, str]:
-    match = re.search(r"^SQL:\s*", text, flags=re.IGNORECASE | re.MULTILINE)
-    if not match:
-        return "", text.strip()
+    """Split a model response into (plan, sql) on the last `SQL:` marker.
 
-    plan = text[: match.start()].strip()
-    sql = text[match.end() :].strip()
+    The output contract asks the model to write `SQL:` on its own line before
+    the SELECT, but real responses sometimes inline it (`... downstream. SQL:
+    SELECT ...`). Use the LAST `SQL:` occurrence (case-insensitive, anywhere
+    in the text) as the split point — this handles inline labels and still
+    tolerates a mid-sentence reference like `I'll write SQL: a SELECT…`
+    inside the plan, because the actual delimiter appears after it.
+
+    Returns `("", text.strip())` when no `SQL:` marker is present, so the
+    validator/UI can show what the model actually produced.
+    """
+    matches = list(re.finditer(r"SQL:\s*", text, flags=re.IGNORECASE))
+    if not matches:
+        return "", text.strip()
+    last = matches[-1]
+    plan = text[: last.start()].strip()
+    sql = text[last.end() :].strip()
     if plan.upper().startswith("PLAN:"):
         plan = plan[5:].strip()
     return plan, sql
@@ -1255,7 +1292,7 @@ First, write a short PLAN paragraph (2-4 lines) covering:
 - the grain you are answering at (row-level vs aggregated)
 - any aggregation/GROUP BY you intend to use
 - if the question conflicts (e.g. asks for two grains), which one you chose and why
-Then, on a new line, write "SQL:" followed by ONE SELECT statement. No markdown fences.
+Then, on a new line, write the literal token "SQL:" by itself, then on the next line ONE SELECT statement. The "SQL:" label MUST be preceded by a newline (not inline with the plan). No markdown fences.
 
 GROUP BY RULES
 - Every non-aggregated column in SELECT must appear in GROUP BY.
@@ -1353,7 +1390,13 @@ def _run_query(
                     }
                 except (SQLValidationError, duckdb.Error) as exc:
                     if attempt == 1:
-                        raise
+                        raise QueryGenerationError(
+                            original=exc,
+                            plan=plan,
+                            sql=sql,
+                            raw=raw,
+                            attempts=2,
+                        ) from exc
                     messages.append({"role": "assistant", "content": raw})
                     messages.append({"role": "user", "content": _retry_prompt(exc, table)})
     finally:
@@ -1561,6 +1604,26 @@ async def _stream_analytics(
             litellm_url, litellm_model, api_key,
         )
         elapsed = time.time() - t0
+    except QueryGenerationError as e:
+        yield f"> **Error:** {e.original} (after {e.attempts} attempts)\n"
+        if e.plan:
+            yield f">\n> **Plan from last attempt:** {e.plan}\n"
+        sql_preview = e.sql.strip() if e.sql else ""
+        if sql_preview:
+            yield ">\n> **SQL from last attempt:**\n> ```sql\n"
+            for line in sql_preview.splitlines():
+                yield f"> {line}\n"
+            yield "> ```\n"
+        else:
+            raw_preview = (e.raw or "").strip()
+            if raw_preview:
+                yield ">\n> **Raw model output (no SQL chunk parsed):**\n> ```\n"
+                for line in raw_preview.splitlines():
+                    yield f"> {line}\n"
+                yield "> ```\n"
+        if emitter:
+            await emitter({"type": "status", "data": {"description": "Done", "done": True}})
+        return
     except Exception as e:
         yield f"> **Error:** {e}\n"
         if emitter:
