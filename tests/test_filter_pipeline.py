@@ -221,6 +221,35 @@ def test_run_supervisor_can_receive_candidate_registry_only():
     assert "Available tables:" in captured_messages["user"]
 
 
+def test_run_supervisor_unknown_table_returns_low_confidence():
+    from filter_analytics import _run_supervisor
+
+    registry = {
+        "kpi_zone_net_flow": {
+            "description": "Zone-level pickup/dropoff imbalance",
+            "tier": "kpi",
+            "columns": [{"name": "net_flow", "type": "int64"}],
+            "example_questions": [],
+        }
+    }
+
+    def fake_llm(messages, model, litellm_url, api_key=""):
+        return '{"table": "fact", "confidence": "high", "reasoning": "raw records"}'
+
+    with patch("filter_analytics._llm_chat", side_effect=fake_llm):
+        result = _run_supervisor(
+            "Show exact individual taxi trip records with passenger names and payment card numbers.",
+            registry,
+            "http://litellm",
+            "private-chat",
+            "",
+        )
+
+    assert result["confidence"] == "low"
+    assert result["table"] == ""
+    assert "not listed" in result["reasoning"]
+
+
 def test_strip_fences_removes_sql_block():
     assert _strip_fences("```sql\nSELECT 1\n```") == "SELECT 1"
 
@@ -411,9 +440,10 @@ async def test_pipe_analytics_emits_status_events():
         yield "Summary"
 
     with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
-        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
+        gen = await pipe.pipe(body, __event_emitter__=mock_emitter)
+        chunks = [chunk async for chunk in gen]
 
-    assert result == "> **Table:** `kpi`\nSummary"
+    assert "".join(chunks) == "> **Table:** `kpi`\nSummary"
 
 
 @pytest.mark.asyncio
@@ -427,9 +457,10 @@ async def test_pipe_analytics_skips_emitter_when_none():
         yield "Response"
 
     with patch("filter_analytics._stream_analytics", return_value=fake_stream()):
-        result = await pipe.pipe(body, __event_emitter__=None)
+        gen = await pipe.pipe(body, __event_emitter__=None)
+        chunks = [chunk async for chunk in gen]
 
-    assert result == "Response"
+    assert "".join(chunks) == "Response"
 
 
 @pytest.mark.asyncio
@@ -1005,7 +1036,9 @@ async def test_full_pipe_integration_streams_trace_and_summary():
          patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
          patch("filter_analytics._stream_summary", return_value=fake_stream_summary()):
 
-        result = await pipe.pipe(body, __event_emitter__=mock_emitter)
+        gen = await pipe.pipe(body, __event_emitter__=mock_emitter)
+        chunks = [chunk async for chunk in gen]
+        result = "".join(chunks)
 
     assert "> **Table:** `kpi_monthly_summary`" in result
     assert "Monthly revenue match" in result

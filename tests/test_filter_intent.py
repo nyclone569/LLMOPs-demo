@@ -25,6 +25,10 @@ def test_routes_analytics_on_top_zones():
     assert classify_intent("top pickup zones by revenue") == INTENT_ANALYTICS
 
 
+def test_routes_analytics_on_explicit_underscored_table_name():
+    assert classify_intent("Show me table kpi_zone_net_flow") == INTENT_ANALYTICS
+
+
 def test_routes_ambiguous_on_domain_only():
     assert classify_intent("what about taxi") == INTENT_AMBIGUOUS
 

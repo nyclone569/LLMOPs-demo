@@ -8,6 +8,7 @@ requirements: duckdb==1.2.2, httpx>=0.27, pydantic>=2
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
@@ -95,6 +96,11 @@ CHART_PRESENTATION_WORDS = {
     "line chart",
 }
 
+TABLE_IDENTIFIER = re.compile(
+    r"\b(?:kpi|fact|dim|route|ops|dq)[_-][a-z0-9][a-z0-9_-]*\b",
+    re.IGNORECASE,
+)
+
 INTENT_ANALYTICS = "analytics"
 INTENT_AMBIGUOUS = "ambiguous"
 INTENT_CHAT = "chat"
@@ -103,13 +109,19 @@ INTENT_CHAT = "chat"
 def classify_intent(message: str) -> str:
     """Three-tier intent classification based on domain + analytics signal counts."""
     lower = message.lower()
-
-    domain_count = sum(
-        1 for term in DOMAIN_TERMS if re.search(rf"\b{re.escape(term)}\b", lower)
-    )
+    match_text = re.sub(r"[_-]+", " ", lower)
 
     analytics_count = sum(
-        1 for word in ANALYTICS_WORDS if re.search(rf"\b{re.escape(word)}\b", lower)
+        1 for word in ANALYTICS_WORDS if re.search(rf"\b{re.escape(word)}\b", match_text)
+    )
+
+    if TABLE_IDENTIFIER.search(lower):
+        if analytics_count >= 1:
+            return INTENT_ANALYTICS
+        return INTENT_AMBIGUOUS
+
+    domain_count = sum(
+        1 for term in DOMAIN_TERMS if re.search(rf"\b{re.escape(term)}\b", match_text)
     )
 
     if domain_count >= 1 and analytics_count >= 1:
@@ -1086,7 +1098,14 @@ def _run_supervisor(
     parsed = json.loads(cleaned.strip())
     table = parsed.get("table", "")
     if table not in registry:
-        raise ValueError(f"Supervisor selected unknown table: {table}")
+        return {
+            "table": "",
+            "confidence": "low",
+            "reasoning": (
+                "Requested data did not match an available table; selected table is not listed in the registry: "
+                f"{table or 'unknown'}"
+            ),
+        }
     confidence = parsed.get("confidence", "low")
     if confidence not in ("high", "low"):
         confidence = "low"
@@ -1423,7 +1442,9 @@ async def _stream_analytics(
         else:
             prompt_candidates = exact_candidates or candidates
             prompt_registry = _candidate_registry(registry, prompt_candidates) if prompt_candidates else registry
-            supervisor = _run_supervisor(question, prompt_registry, litellm_url, litellm_model, api_key)
+            supervisor = await asyncio.to_thread(
+                _run_supervisor, question, prompt_registry, litellm_url, litellm_model, api_key,
+            )
     except Exception as e:
         yield f"> **Error:** Table selection failed — {e}\n"
         if emitter:
@@ -1440,14 +1461,24 @@ async def _stream_analytics(
     yield f"> **Table:** `{table}` — {reasoning} (confidence: {confidence})\n"
 
     if confidence == "low":
-        yield "\nI wasn't confident which data to use. Could you be more specific?\n"
+        suggestions = [c["table"] for c in candidates[:3] if c.get("table") and c["table"] != table]
+        if suggestions:
+            bullets = "\n".join(f"> - `{name}`" for name in suggestions)
+            yield (
+                "\nI wasn't confident which data to use. Did you mean one of these?\n"
+                f"{bullets}\n"
+                "\nIf so, ask again naming the table — otherwise please rephrase.\n"
+            )
+        else:
+            yield "\nI wasn't confident which data to use. Could you be more specific?\n"
         if emitter:
             await emitter({"type": "status", "data": {"description": "Done", "done": True}})
         return
 
     try:
         t0 = time.time()
-        query_result = _run_query(
+        query_result = await asyncio.to_thread(
+            _run_query,
             question, table, registry, s3_bucket, aws_region,
             litellm_url, litellm_model, api_key,
         )
@@ -1471,17 +1502,33 @@ async def _stream_analytics(
             await emitter({"type": "status", "data": {"description": "Done", "done": True}})
         return
 
-    artifacts: list[str] = []
-    artifact_note = ""
     mode = _select_presentation_mode(question, rows)
 
+    # Chart spec is an LLM round-trip that only depends on `rows`. Kick it off
+    # now so it runs in parallel with the streaming summary instead of after.
+    chart_task: asyncio.Task | None = None
+    if mode in {"chart", "both", "auto"}:
+        chart_task = asyncio.create_task(
+            asyncio.to_thread(
+                _run_chart_spec, question, rows, litellm_url, litellm_model, api_key,
+            )
+        )
+
     if emitter:
-        await emitter({"type": "status", "data": {"description": f"Queried {len(rows)} rows — preparing response...", "done": False}})
+        await emitter({"type": "status", "data": {"description": f"Writing summary for {len(rows)} rows...", "done": False}})
+    yield "---\n\n"
+    try:
+        async for token in _stream_summary(question, rows, capped, litellm_url, litellm_model, api_key):
+            yield token
+    except Exception as e:
+        traceback.print_exc()
+        yield f"\n\n> **Error:** Could not generate summary — {e}\n"
+
+    artifacts: list[str] = []
+    artifact_note = ""
 
     try:
-        chart_spec = None
-        if mode in {"chart", "both", "auto"}:
-            chart_spec = _run_chart_spec(question, rows, litellm_url, litellm_model, api_key)
+        chart_spec = await chart_task if chart_task else None
 
         if mode == "auto" and chart_spec and chart_spec.get("type") == "table":
             mode = "table"
@@ -1504,16 +1551,6 @@ async def _stream_analytics(
     except Exception:
         traceback.print_exc()
         artifact_note = "\n\n> **Note:** The requested table or chart could not be rendered.\n"
-
-    if emitter:
-        await emitter({"type": "status", "data": {"description": "Writing summary...", "done": False}})
-    yield "---\n\n"
-    try:
-        async for token in _stream_summary(question, rows, capped, litellm_url, litellm_model, api_key):
-            yield token
-    except Exception as e:
-        traceback.print_exc()
-        yield f"\n\n> **Error:** Could not generate summary — {e}\n"
 
     if artifact_note:
         yield artifact_note
@@ -1543,8 +1580,16 @@ class Pipe:
     def __init__(self):
         self.valves = self.Valves()
 
-    async def pipe(self, body: dict, __event_emitter__=None) -> str | StreamingResponse:
-        """Route message to analytics pipeline or LiteLLM passthrough based on intent."""
+    async def pipe(self, body: dict, __event_emitter__=None):
+        """Route message to analytics pipeline or LiteLLM passthrough based on intent.
+
+        Returns:
+            - StreamingResponse for chat / passthrough (Open WebUI streams it as SSE).
+            - str for ambiguous clarifications.
+            - AsyncGenerator[str] for analytics, so the reasoning trace and summary
+              tokens reach the user as they're produced rather than after the whole
+              pipeline (table → SQL → DuckDB → chart → summary) finishes.
+        """
         if not self.valves.enabled:
             try:
                 return await _stream_llm(
@@ -1605,9 +1650,11 @@ class Pipe:
                 "like to know (e.g. 'show monthly revenue trend' or 'top boroughs by trips')."
             )
 
-        # INTENT_ANALYTICS
-        chunks = []
-        async for chunk in _stream_analytics(
+        # INTENT_ANALYTICS — return the async generator directly so Open WebUI
+        # streams chunks live. Buffering with "".join(chunks) defeats the entire
+        # streaming pipeline (registry + supervisor + DuckDB + chart + summary
+        # easily totals 10–30s end-to-end).
+        return _stream_analytics(
             question,
             self.valves.s3_bucket,
             self.valves.aws_region,
@@ -1618,6 +1665,4 @@ class Pipe:
             self.valves.duckdb_timeout,
             self.valves.row_cap,
             __event_emitter__,
-        ):
-            chunks.append(chunk)
-        return "".join(chunks)
+        )
