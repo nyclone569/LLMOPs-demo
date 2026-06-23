@@ -16,6 +16,7 @@ from typing import Optional
 from pathlib import Path
 import html as html_lib
 import hashlib
+import duckdb
 import httpx
 import json
 import os
@@ -204,6 +205,27 @@ def _strip_fences(text: str) -> str:
     text = text.strip()
     match = re.match(r"^```(?:sql)?\s*\n?(.*?)\n?```$", text, re.DOTALL)
     return match.group(1).strip() if match else text
+
+
+def _split_plan_and_sql(text: str) -> tuple[str, str]:
+    match = re.search(r"^SQL:\s*", text, flags=re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return "", text.strip()
+
+    plan = text[: match.start()].strip()
+    sql = text[match.end() :].strip()
+    if plan.upper().startswith("PLAN:"):
+        plan = plan[5:].strip()
+    return plan, sql
+
+
+def _retry_prompt(exc: Exception, table: str) -> str:
+    return (
+        f"Your SQL was rejected: {exc}. "
+        "Re-read the GROUP BY rules and the columns list, fix the issue, "
+        f"and rewrite as ONE SELECT against {table}. Return PLAN then SQL."
+    )
+
 
 
 def _normalize_duckdb_sql(sql: str) -> str:
@@ -1122,6 +1144,21 @@ ROW_CAP = 200
 DUCKDB_TIMEOUT = 30
 
 
+def _wrap_with_limit(sql: str, row_cap: int = ROW_CAP) -> tuple[str, bool]:
+    depth, top_limit = 0, False
+    for token in re.split(r"(\(|\))", sql):
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth -= 1
+        elif depth == 0 and re.search(r"\bLIMIT\s+\d+", token, re.IGNORECASE):
+            top_limit = True
+            break
+
+    if top_limit:
+        return sql, False
+    return f"SELECT * FROM ({sql}) _q LIMIT {row_cap + 1}", True
+
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -1191,16 +1228,73 @@ def _create_s3_secret(conn, aws_region: str) -> str:
     return "credential_chain"
 
 
-_QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics stored in Parquet files on S3.
-Rules:
-- Write ONE SELECT statement only
-- No markdown, no explanation, just the SQL
-- Use only the table and columns provided
-- Revenue = total_fare_amount (excludes tips)
-- Borough values: Manhattan, Brooklyn, Queens, Bronx, Staten Island
+def _execute_sql(conn, sql_capped: str) -> list[dict]:
+    return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
+
+
+def _build_duckdb_conn(table: str, s3_bucket: str, aws_region: str):
+    conn = duckdb.connect(
+        config={
+            "memory_limit": "512MB",
+            "extension_directory": "/tmp/duckdb-extensions",
+        }
+    )
+    path = f"s3://{s3_bucket}/{table}/*.parquet"
+    conn.execute("INSTALL httpfs; LOAD httpfs;")
+    auth_mode = _create_s3_secret(conn, aws_region)
+    print(f"DuckDB S3 auth mode: {auth_mode}; path: {path}")
+    conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
+    return conn
+
+
+_QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics on DuckDB reading Parquet files on S3.
+
+OUTPUT CONTRACT
+First, write a short PLAN paragraph (2-4 lines) covering:
+- which columns from the table answer the question
+- the grain you are answering at (row-level vs aggregated)
+- any aggregation/GROUP BY you intend to use
+- if the question conflicts (e.g. asks for two grains), which one you chose and why
+Then, on a new line, write "SQL:" followed by ONE SELECT statement. No markdown fences.
+
+GROUP BY RULES
+- Every non-aggregated column in SELECT must appear in GROUP BY.
+- If a column is already a measure on a pre-aggregated table (revenue, trip_count, avg_fare etc. on kpi_*/route_*/ops_*), do NOT re-aggregate unless rolling up to a coarser grain.
+- When rolling up: SUM measures, AVG only ratios with care, COUNT(*) for trip_count rollups.
+
+DUCKDB DIALECT
+- Recent windows: CURRENT_DATE - INTERVAL 7 DAY (not DATE_SUB)
+- Date parts: EXTRACT(month FROM date_col)
+- No read_parquet(), httpfs, COPY, or file functions
+- One SELECT statement, no semicolons, no DDL
+
+DOMAIN
+- Borough names: Manhattan, Brooklyn, Queens, Bronx, Staten Island
 - Peak hours: 7-9 and 17-20 (24h)
-- Use DuckDB SQL syntax for dates; for recent windows use CURRENT_DATE - INTERVAL 7 DAY, not DATE_SUB()
-- Do not use read_parquet(), httpfs, or any file functions"""
+- The revenue column is called `revenue` on most tables (16 tables) and `total_revenue` on a few (`fact_trips_daily`, `fact_trips_hourly_zone`, `kpi_monthly_summary`, `dq_*`). Use the exact name shown in the per-query Columns list.
+- Pre-aggregated tables (`kpi_*`/`route_*`/`ops_*`/`fact_trips_borough`) already contain summed measures — select directly, do not re-aggregate unless rolling up to a coarser grain.
+
+EXAMPLES
+
+Q: top 20 pickup zones by total revenue, with a borough breakdown chart
+Table: route_top_pickup_zones
+PLAN: route_top_pickup_zones is pre-aggregated at zone grain. The user asked for top 20 zones AND a borough chart — conflicting grain. I'll answer at zone grain (more specific) and keep pickup_borough so the chart agent can group it downstream.
+SQL:
+SELECT pickup_zone, pickup_borough, revenue
+FROM route_top_pickup_zones
+ORDER BY revenue DESC
+LIMIT 20
+
+Q: weekly revenue trend over the last 8 weeks
+Table: fact_trips_daily
+PLAN: fact_trips_daily is at day grain. Need to roll up to weeks and aggregate revenue. Use DATE_TRUNC for the week bucket and a recent window filter.
+SQL:
+SELECT DATE_TRUNC('week', pickup_date) AS week,
+       SUM(total_revenue) AS revenue
+FROM fact_trips_daily
+WHERE pickup_date >= CURRENT_DATE - INTERVAL 56 DAY
+GROUP BY 1
+ORDER BY 1"""
 
 
 def _run_query(
@@ -1213,75 +1307,59 @@ def _run_query(
     litellm_model: str = LITELLM_MODEL,
     api_key: str = "",
 ) -> dict:
-    """Returns {"sql": str, "rows": list[dict], "capped": bool}."""
+    """Returns {"sql": str, "plan": str, "rows": list[dict], "capped": bool}."""
     schema = registry[table]
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
         raise ValueError(f"Invalid aws_region format: {aws_region!r}")
     if not re.fullmatch(r"[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]", s3_bucket):
         raise ValueError(f"Invalid s3_bucket: {s3_bucket!r}")
     col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
-    messages = [
+    messages: list[dict] = [
         {"role": "system", "content": _QUERY_SYSTEM},
         {
             "role": "user",
             "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}",
         },
     ]
-    raw = _llm_chat(
-        messages, model=litellm_model, litellm_url=litellm_url, api_key=api_key
-    )
-    sql = _normalize_duckdb_sql(_strip_fences(raw).rstrip(";").strip())
-    _validate_sql(sql, table, set(registry.keys()))
 
-    # Check whether the *top-level* query already has a LIMIT. Scanning the full
-    # SQL string would match LIMIT inside CTEs (e.g. WITH x AS (... LIMIT 500))
-    # and skip the outer cap, letting DuckDB materialise unbounded rows.
-    # Walk at depth=0 only to detect a true top-level LIMIT.
-    _depth, _top_limit = 0, False
-    for _tok in re.split(r"(\(|\))", sql):
-        if _tok == "(":
-            _depth += 1
-        elif _tok == ")":
-            _depth -= 1
-        elif _depth == 0 and re.search(r"\bLIMIT\s+\d+", _tok, re.IGNORECASE):
-            _top_limit = True
-            break
-    if not _top_limit:
-        sql_capped = f"SELECT * FROM ({sql}) _q LIMIT {ROW_CAP + 1}"
-    else:
-        # Model already added a top-level LIMIT; 512MB DuckDB cap is the backstop.
-        sql_capped = sql
+    conn = _build_duckdb_conn(table, s3_bucket, aws_region)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            for attempt in range(2):
+                raw = _llm_chat(
+                    messages,
+                    model=litellm_model,
+                    litellm_url=litellm_url,
+                    api_key=api_key,
+                )
+                stripped = _strip_fences(raw)
+                plan, sql = _split_plan_and_sql(stripped)
+                sql = _normalize_duckdb_sql(sql.rstrip(";").strip())
 
-    import duckdb
+                try:
+                    _validate_sql(sql, table, set(registry.keys()))
+                    sql_capped, _ = _wrap_with_limit(sql)
+                    future = executor.submit(_execute_sql, conn, sql_capped)
+                    try:
+                        rows = future.result(timeout=DUCKDB_TIMEOUT)
+                    except FuturesTimeoutError:
+                        raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
+                    capped = len(rows) > ROW_CAP
+                    return {
+                        "sql": sql,
+                        "plan": plan,
+                        "rows": rows[:ROW_CAP],
+                        "capped": capped,
+                    }
+                except (SQLValidationError, duckdb.Error) as exc:
+                    if attempt == 1:
+                        raise
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({"role": "user", "content": _retry_prompt(exc, table)})
+    finally:
+        conn.close()
 
-    def _execute():
-        conn = duckdb.connect(
-            config={
-                "memory_limit": "512MB",
-                "extension_directory": "/tmp/duckdb-extensions",
-            }
-        )
-        try:
-            path = f"s3://{s3_bucket}/{table}/*.parquet"
-            conn.execute("INSTALL httpfs; LOAD httpfs;")
-            auth_mode = _create_s3_secret(conn, aws_region)
-            print(
-                f"DuckDB S3 auth mode: {auth_mode}; path: s3://{s3_bucket}/{table}/*.parquet"
-            )
-            conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
-            return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
-        finally:
-            conn.close()
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_execute)
-        try:
-            rows = future.result(timeout=DUCKDB_TIMEOUT)
-        except FuturesTimeoutError:
-            raise TimeoutError(f"DuckDB query exceeded {DUCKDB_TIMEOUT}s")
-
-    capped = len(rows) > ROW_CAP
-    return {"sql": sql, "rows": rows[:ROW_CAP], "capped": capped}
+    raise RuntimeError("SQL generation failed without returning a result")
 
 
 
@@ -1492,7 +1570,10 @@ async def _stream_analytics(
     rows = query_result["rows"]
     sql = query_result["sql"]
     capped = query_result["capped"]
+    plan = (query_result.get("plan") or "").strip()
 
+    if plan:
+        yield f"> **Plan:** {plan}\n"
     yield f"> **SQL:**\n> ```sql\n> {sql}\n> ```\n"
     yield f"> **Result:** {len(rows)} rows ({elapsed:.1f}s)\n\n"
 

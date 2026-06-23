@@ -7,6 +7,7 @@ from filter_analytics import (
     INTENT_ANALYTICS,
     INTENT_AMBIGUOUS,
     INTENT_CHAT,
+    _QUERY_SYSTEM,
     _normalize_duckdb_sql,
     _select_presentation_mode,
 )
@@ -94,6 +95,15 @@ def test_select_presentation_mode_empty_rows_is_text():
 def test_select_presentation_mode_no_display_preference_is_auto():
     rows = [{"month": "Jan", "revenue": 1000}]
     assert _select_presentation_mode("show monthly revenue trend", rows) == "auto"
+
+
+def test_query_system_prompt_contains_group_by_rule():
+    assert "GROUP BY" in _QUERY_SYSTEM
+
+
+def test_query_system_prompt_contains_plan_and_sql_contract():
+    assert "PLAN:" in _QUERY_SYSTEM
+    assert "SQL:" in _QUERY_SYSTEM
 
 
 def test_normalize_duckdb_sql_rewrites_mysql_current_date_subtract_interval():

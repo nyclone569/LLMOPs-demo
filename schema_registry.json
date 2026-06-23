@@ -376,7 +376,7 @@
     }
   },
   "fact_trips_borough": {
-    "description": "Fact Trips Borough \u2014 auto-generated, update manually",
+    "description": "Daily NYC taxi facts pre-aggregated at (date, borough) grain.",
     "tier": "fact",
     "columns": [
       {
@@ -404,7 +404,10 @@
         "type": "double"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "daily revenue by borough over the last 7 days",
+      "trip count per borough per day"
+    ],
     "dimensions": [
       "pickup_date",
       "pickup_borough"
@@ -422,11 +425,32 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "fact trips borough",
+      "borough trips daily",
+      "borough revenue by day",
+      "daily borough trips"
+    ],
+    "grain": "one row per (pickup_date, pickup_borough)",
+    "use_for": [
+      "daily borough revenue and trip count trends",
+      "borough comparisons over a date range"
+    ],
+    "avoid_for": [
+      "zone-level questions because this table is aggregated to borough",
+      "hourly trends because this table has no hour column"
+    ]
   },
   "fact_trips_daily": {
-    "description": "Fact Trips Daily \u2014 auto-generated, update manually",
+    "description": "Daily NYC taxi facts pre-aggregated at day grain across the whole city.",
     "tier": "fact",
     "columns": [
       {
@@ -462,7 +486,10 @@
         "type": "int64"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "daily revenue over the last 30 days",
+      "weekly revenue trend over the last 8 weeks"
+    ],
     "dimensions": [
       "pickup_date"
     ],
@@ -482,11 +509,32 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "fact trips daily",
+      "daily trips",
+      "daily revenue",
+      "daily fact trips"
+    ],
+    "grain": "one row per pickup_date (city-wide)",
+    "use_for": [
+      "city-wide daily revenue and trip count trends",
+      "rolling up days to weeks or months with DATE_TRUNC"
+    ],
+    "avoid_for": [
+      "borough or zone splits because this table is city-wide",
+      "hourly trends because this table has no hour column"
+    ]
   },
   "fact_trips_hourly": {
-    "description": "Fact Trips Hourly \u2014 auto-generated, update manually",
+    "description": "Hourly NYC taxi facts pre-aggregated at (date, hour) grain across the whole city.",
     "tier": "fact",
     "columns": [
       {
@@ -518,7 +566,10 @@
         "type": "double"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "trips by hour of day",
+      "revenue during peak hours over the last week"
+    ],
     "dimensions": [
       "pickup_date",
       "pickup_hour"
@@ -537,11 +588,33 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "fact trips hourly",
+      "hourly trips",
+      "hourly revenue",
+      "trips by hour"
+    ],
+    "grain": "one row per (pickup_date, pickup_hour) city-wide",
+    "use_for": [
+      "hourly demand patterns within a day",
+      "peak-hour analysis (hours 7-9 and 17-20)",
+      "hour-of-day revenue or trip count trends"
+    ],
+    "avoid_for": [
+      "borough or zone splits because this table is city-wide; use fact_trips_hourly_zone instead",
+      "multi-week trends without DATE_TRUNC rollup because hourly grain is noisy at that scale"
+    ]
   },
   "fact_trips_hourly_zone": {
-    "description": "Fact Trips Hourly Zone \u2014 auto-generated, update manually",
+    "description": "Hourly NYC taxi facts pre-aggregated at (date, hour, pickup zone) grain with borough context.",
     "tier": "fact",
     "columns": [
       {
@@ -577,7 +650,10 @@
         "type": "int64"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "hourly revenue for Midtown over the last week",
+      "peak-hour trips per borough"
+    ],
     "dimensions": [
       "pickup_date",
       "pickup_hour",
@@ -597,11 +673,31 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "fact trips hourly zone",
+      "hourly trips by zone",
+      "zone hourly trips"
+    ],
+    "grain": "one row per (pickup_date, pickup_hour, pickup_zone)",
+    "use_for": [
+      "hourly demand by zone or borough",
+      "zone peak-hour analysis with revenue context"
+    ],
+    "avoid_for": [
+      "vendor, payment, or passenger breakdowns because none of those columns are present",
+      "city-wide rollups without explicit GROUP BY because rows are zone-level"
+    ]
   },
   "kpi_borough_comparison": {
-    "description": "Kpi Borough Comparison \u2014 auto-generated, update manually",
+    "description": "Borough-level KPI comparison pre-aggregated across the full window: trips, revenue, market share, avg fare/tip/distance.",
     "tier": "kpi",
     "columns": [
       {
@@ -633,7 +729,10 @@
         "type": "double"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "which borough has the highest revenue",
+      "borough market share comparison"
+    ],
     "dimensions": [
       "pickup_borough"
     ],
@@ -650,11 +749,32 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "kpi borough comparison",
+      "borough comparison",
+      "borough kpi",
+      "compare boroughs"
+    ],
+    "grain": "one row per pickup_borough (window-wide totals, no date)",
+    "use_for": [
+      "borough leaderboards by revenue or trips",
+      "borough market share comparisons"
+    ],
+    "avoid_for": [
+      "daily or hourly trends because this table is a window-wide rollup with no date column",
+      "zone-level questions because this table is aggregated to borough"
+    ]
   },
   "kpi_daily_overview": {
-    "description": "Kpi Daily Overview \u2014 auto-generated, update manually",
+    "description": "Daily city-wide KPI overview with revenue, fare, tip, distance, vendors, and utilization.",
     "tier": "kpi",
     "columns": [
       {
@@ -694,7 +814,10 @@
         "type": "decimal128(23, 1)"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "daily KPIs for the last 30 days",
+      "trend of utilization rate over the past week"
+    ],
     "dimensions": [
       "pickup_date"
     ],
@@ -715,8 +838,29 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "kpi daily overview",
+      "daily overview",
+      "daily kpi",
+      "daily kpis"
+    ],
+    "grain": "one row per pickup_date (city-wide)",
+    "use_for": [
+      "daily KPI dashboards (revenue, trips, avg fare, utilization)",
+      "day-over-day comparisons of headline metrics"
+    ],
+    "avoid_for": [
+      "borough, zone, vendor, or payment splits because this table is city-wide",
+      "hourly trends because this table has no hour column"
+    ]
   },
   "kpi_monthly_summary": {
     "description": "Kpi Monthly Summary \u2014 auto-generated, update manually",
@@ -781,7 +925,7 @@
     }
   },
   "kpi_payment_trends": {
-    "description": "Kpi Payment Trends \u2014 auto-generated, update manually",
+    "description": "Payment-method KPI rollup: trip counts, revenue, average fare and tip per payment type.",
     "tier": "kpi",
     "columns": [
       {
@@ -813,7 +957,10 @@
         "type": "double"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "average tip percentage by payment type",
+      "revenue split between cash and card"
+    ],
     "dimensions": [
       "payment_desc"
     ],
@@ -830,8 +977,29 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "kpi payment trends",
+      "payment trends",
+      "payment type breakdown",
+      "tips by payment"
+    ],
+    "grain": "one row per payment_type",
+    "use_for": [
+      "payment method comparisons (cash vs card)",
+      "tip rate analysis by payment type"
+    ],
+    "avoid_for": [
+      "time-series questions because this table has no date column",
+      "borough or zone splits because this table is payment-only"
+    ]
   },
   "kpi_vendor_performance": {
     "description": "Kpi Vendor Performance \u2014 auto-generated, update manually",
@@ -1056,7 +1224,7 @@
     ]
   },
   "kpi_zone_performance": {
-    "description": "Kpi Zone Performance \u2014 auto-generated, update manually",
+    "description": "Zone performance scorecard: pickups, dropoffs, net flow, revenue split, airport mix.",
     "tier": "kpi",
     "columns": [
       {
@@ -1116,7 +1284,10 @@
         "type": "decimal128(24, 1)"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "zone performance for JFK",
+      "zones with the highest airport trip percentage"
+    ],
     "dimensions": [
       "location_id",
       "zone",
@@ -1140,8 +1311,29 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "kpi zone performance",
+      "zone performance",
+      "zone scorecard"
+    ],
+    "grain": "one row per taxi zone",
+    "use_for": [
+      "zone scorecards combining flow and revenue",
+      "airport pickup mix per zone",
+      "zone-level net flow with revenue context"
+    ],
+    "avoid_for": [
+      "daily/hourly trends because this table has no date column",
+      "pickup-to-dropoff route pairs because this table is zone-level, not route-pair grain"
+    ]
   },
   "od_borough_matrix": {
     "description": "Od Borough Matrix \u2014 auto-generated, update manually",
@@ -1671,7 +1863,7 @@
     }
   },
   "route_top_pickup_zones": {
-    "description": "Route Top Pickup Zones \u2014 auto-generated, update manually",
+    "description": "Top pickup zones pre-aggregated at zone grain with borough context.",
     "tier": "route",
     "columns": [
       {
@@ -1699,7 +1891,10 @@
         "type": "double"
       }
     ],
-    "example_questions": [],
+    "example_questions": [
+      "top 20 pickup zones by revenue",
+      "busiest pickup zones in Manhattan"
+    ],
     "dimensions": [
       "pickup_zone",
       "pickup_borough"
@@ -1715,7 +1910,28 @@
       "columns": "schema",
       "dimensions": "derived",
       "measures": "derived",
-      "date_columns": "derived"
-    }
+      "date_columns": "derived",
+      "description": "curated",
+      "aliases": "curated",
+      "grain": "curated",
+      "use_for": "curated",
+      "avoid_for": "curated",
+      "example_questions": "curated"
+    },
+    "aliases": [
+      "top pickup zones",
+      "busiest pickup zones",
+      "popular pickup zones",
+      "route top pickup zones"
+    ],
+    "grain": "one row per pickup zone",
+    "use_for": [
+      "ranking pickup zones by trips/revenue",
+      "zone leaderboards with borough context"
+    ],
+    "avoid_for": [
+      "daily/hourly trends because this table has no date column",
+      "borough-only rollups because pickup_borough is a side dimension; use kpi_borough_comparison instead"
+    ]
   }
 }

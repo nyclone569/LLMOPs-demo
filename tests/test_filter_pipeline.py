@@ -4,10 +4,22 @@ import sys
 import time
 import json
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import MagicMock, patch, mock_open
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "openwebui"))
-from filter_analytics import _strip_fences, _validate_sql, SQLValidationError, build_html_artifact, chart_spec_to_vegalite, _load_registry, _stream_summary, _stream_analytics
+from filter_analytics import (
+    _strip_fences,
+    _split_plan_and_sql,
+    _wrap_with_limit,
+    _retry_prompt,
+    _validate_sql,
+    SQLValidationError,
+    build_html_artifact,
+    chart_spec_to_vegalite,
+    _load_registry,
+    _stream_summary,
+    _stream_analytics,
+)
 
 
 class _FakeHTTPResponse:
@@ -260,6 +272,377 @@ def test_strip_fences_removes_plain_block():
 
 def test_strip_fences_passthrough_plain_sql():
     assert _strip_fences("SELECT 1") == "SELECT 1"
+
+
+
+def test_split_plan_and_sql_extracts_first_anchored_sql_block():
+    plan, sql = _split_plan_and_sql(
+        "PLAN: Use route_top_pickup_zones at zone grain.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+    )
+
+    assert plan == "Use route_top_pickup_zones at zone grain."
+    assert sql == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_split_plan_and_sql_missing_delimiter_returns_empty_plan():
+    text = "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+    plan, sql = _split_plan_and_sql(text)
+
+    assert plan == ""
+    assert sql == text
+
+
+def test_split_plan_and_sql_ignores_mid_sentence_sql_colon():
+    plan, sql = _split_plan_and_sql(
+        "PLAN: I will write SQL: a single SELECT at zone grain.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+    )
+
+    assert plan == "I will write SQL: a single SELECT at zone grain."
+    assert sql == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_split_plan_and_sql_is_case_insensitive():
+    plan, sql = _split_plan_and_sql(
+        "plan: The table is already at pickup-zone grain.\n"
+        "sql:\n"
+        "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+    )
+
+    assert plan == "The table is already at pickup-zone grain."
+    assert sql == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_split_plan_and_sql_preserves_multiline_plan():
+    plan, sql = _split_plan_and_sql(
+        "PLAN: route_top_pickup_zones is pre-aggregated.\n"
+        "The answer should stay at pickup-zone grain and retain borough context.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, pickup_borough, revenue FROM route_top_pickup_zones"
+    )
+
+    assert plan == (
+        "route_top_pickup_zones is pre-aggregated.\n"
+        "The answer should stay at pickup-zone grain and retain borough context."
+    )
+    assert sql == "SELECT pickup_zone, pickup_borough, revenue FROM route_top_pickup_zones"
+
+
+def test_wrap_with_limit_wraps_query_without_top_level_limit():
+    sql = "SELECT pickup_zone, revenue FROM route_top_pickup_zones ORDER BY revenue DESC"
+
+    wrapped, applied_cap = _wrap_with_limit(sql, row_cap=20)
+
+    assert wrapped == (
+        "SELECT * FROM (SELECT pickup_zone, revenue FROM route_top_pickup_zones "
+        "ORDER BY revenue DESC) _q LIMIT 21"
+    )
+    assert applied_cap is True
+
+
+def test_wrap_with_limit_preserves_existing_top_level_limit():
+    sql = "SELECT pickup_zone, revenue FROM route_top_pickup_zones LIMIT 20"
+
+    wrapped, applied_cap = _wrap_with_limit(sql, row_cap=20)
+
+    assert wrapped == sql
+    assert applied_cap is False
+
+
+def test_wrap_with_limit_still_wraps_when_limit_is_inside_cte():
+    sql = (
+        "WITH ranked AS ("
+        "SELECT pickup_zone, revenue FROM route_top_pickup_zones LIMIT 500"
+        ") SELECT pickup_zone, revenue FROM ranked"
+    )
+
+    wrapped, applied_cap = _wrap_with_limit(sql, row_cap=20)
+
+    assert wrapped == f"SELECT * FROM ({sql}) _q LIMIT 21"
+    assert applied_cap is True
+
+
+def test_retry_prompt_includes_error_table_and_output_contract():
+    prompt = _retry_prompt(
+        SQLValidationError("Table 'bad' not allowed"),
+        "route_top_pickup_zones",
+    )
+
+    assert "Your SQL was rejected: Table 'bad' not allowed." in prompt
+    assert "GROUP BY rules" in prompt
+    assert "columns list" in prompt
+    assert "ONE SELECT against route_top_pickup_zones" in prompt
+    assert "Return PLAN then SQL" in prompt
+
+
+def _query_registry():
+    return {
+        "route_top_pickup_zones": {
+            "description": "Top pickup zones",
+            "tier": "route",
+            "columns": [
+                {"name": "pickup_zone", "type": "string"},
+                {"name": "pickup_borough", "type": "string"},
+                {"name": "revenue", "type": "double"},
+            ],
+            "example_questions": [],
+        }
+    }
+
+
+def test_execute_sql_fetches_dict_rows():
+    from filter_analytics import _execute_sql
+
+    class FakeFrame:
+        def to_dict(self, orient):
+            assert orient == "records"
+            return [{"pickup_zone": "Midtown", "revenue": 12.5}]
+
+    class FakeExecuted:
+        def fetchdf(self):
+            return FakeFrame()
+
+    class FakeConn:
+        def __init__(self):
+            self.sql = None
+
+        def execute(self, sql):
+            self.sql = sql
+            return FakeExecuted()
+
+    conn = FakeConn()
+
+    rows = _execute_sql(conn, "SELECT pickup_zone, revenue FROM route_top_pickup_zones")
+
+    assert rows == [{"pickup_zone": "Midtown", "revenue": 12.5}]
+    assert conn.sql == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_build_duckdb_conn_installs_httpfs_creates_secret_and_view():
+    from filter_analytics import _build_duckdb_conn
+
+    fake_conn = MagicMock()
+
+    with patch("filter_analytics.duckdb.connect", return_value=fake_conn) as mock_connect, \
+         patch("filter_analytics._create_s3_secret", return_value="web_identity") as mock_secret:
+        conn = _build_duckdb_conn("route_top_pickup_zones", "analytics-bucket", "ap-southeast-1")
+
+    assert conn is fake_conn
+    mock_connect.assert_called_once_with(
+        config={
+            "memory_limit": "512MB",
+            "extension_directory": "/tmp/duckdb-extensions",
+        }
+    )
+    mock_secret.assert_called_once_with(fake_conn, "ap-southeast-1")
+    executed_sql = [call.args[0] for call in fake_conn.execute.call_args_list]
+    assert executed_sql[0] == "INSTALL httpfs; LOAD httpfs;"
+    assert executed_sql[1] == "CREATE VIEW route_top_pickup_zones AS SELECT * FROM read_parquet('s3://analytics-bucket/route_top_pickup_zones/*.parquet')"
+
+
+def test_run_query_retries_on_duckdb_binder_error():
+    import duckdb
+    from filter_analytics import _run_query
+
+    first_sql = (
+        "PLAN: Wrongly aggregate by borough.\n"
+        "SQL:\n"
+        "SELECT pickup_borough, revenue FROM route_top_pickup_zones GROUP BY pickup_borough"
+    )
+    second_sql = (
+        "PLAN: Keep zone grain and retain borough context.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, pickup_borough, revenue FROM route_top_pickup_zones ORDER BY revenue DESC LIMIT 20"
+    )
+    rows = [{"pickup_zone": "Midtown", "pickup_borough": "Manhattan", "revenue": 100.0}]
+
+    with patch("filter_analytics._llm_chat", side_effect=[first_sql, second_sql]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=[duckdb.BinderException('column "revenue" must appear in the GROUP BY clause'), rows]):
+        mock_build.return_value = MagicMock()
+        result = _run_query(
+            "List the top 20 pickup zones by total taxi revenue following pickup borough",
+            "route_top_pickup_zones",
+            _query_registry(),
+            "analytics-bucket",
+            "ap-southeast-1",
+        )
+
+    assert mock_llm.call_count == 2
+    assert result["plan"] == "Keep zone grain and retain borough context."
+    assert result["sql"] == "SELECT pickup_zone, pickup_borough, revenue FROM route_top_pickup_zones ORDER BY revenue DESC LIMIT 20"
+    assert result["rows"] == rows
+    retry_messages = mock_llm.call_args_list[1].args[0]
+    assert 'column "revenue" must appear in the GROUP BY clause' in retry_messages[-1]["content"]
+
+
+def test_run_query_retries_on_catalog_error():
+    import duckdb
+    from filter_analytics import _run_query
+
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+
+    with patch("filter_analytics._llm_chat", side_effect=[
+        "PLAN: Use a missing column.\nSQL:\nSELECT missing_column FROM route_top_pickup_zones",
+        "PLAN: Use known columns.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones LIMIT 20",
+    ]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=[duckdb.CatalogException("Column missing_column not found"), rows]):
+        mock_build.return_value = MagicMock()
+        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert mock_llm.call_count == 2
+    assert result["rows"] == rows
+    assert result["plan"] == "Use known columns."
+
+
+def test_run_query_raises_after_two_duckdb_failures():
+    import duckdb
+    from filter_analytics import _run_query
+
+    with patch("filter_analytics._llm_chat", side_effect=[
+        "PLAN: First attempt.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones",
+        "PLAN: Second attempt.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones",
+    ]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=[
+             duckdb.BinderException("first binder failure"),
+             duckdb.BinderException("second binder failure"),
+         ]):
+        mock_build.return_value = MagicMock()
+        with pytest.raises(duckdb.Error, match="second binder failure"):
+            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert mock_llm.call_count == 2
+
+
+def test_run_query_validator_then_duckdb_error_in_one_session():
+    import duckdb
+    from filter_analytics import _run_query
+
+    with patch("filter_analytics._llm_chat", side_effect=[
+        "PLAN: Try file access.\nSQL:\nSELECT * FROM read_parquet('s3://x')",
+        "PLAN: Use the table.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones",
+    ]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=duckdb.BinderException("binder after validation")) as mock_execute:
+        mock_build.return_value = MagicMock()
+        with pytest.raises(duckdb.Error, match="binder after validation"):
+            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert mock_llm.call_count == 2
+    assert mock_execute.call_count == 1
+
+
+def test_run_query_extracts_plan_and_sql():
+    from filter_analytics import _run_query
+
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    with patch("filter_analytics._llm_chat", return_value="PLAN: Use zone grain.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones"), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", return_value=rows):
+        mock_build.return_value = MagicMock()
+        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert result["plan"] == "Use zone grain."
+    assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+    assert result["rows"] == rows
+
+
+def test_run_query_handles_missing_plan_delimiter():
+    from filter_analytics import _run_query
+
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    with patch("filter_analytics._llm_chat", return_value="SELECT pickup_zone, revenue FROM route_top_pickup_zones"), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", return_value=rows):
+        mock_build.return_value = MagicMock()
+        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert result["plan"] == ""
+    assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_run_query_strips_fences_around_full_plan_and_sql():
+    from filter_analytics import _run_query
+
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    raw = "```sql\nPLAN: Use zone grain.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones\n```"
+    with patch("filter_analytics._llm_chat", return_value=raw), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", return_value=rows):
+        mock_build.return_value = MagicMock()
+        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert result["plan"] == "Use zone grain."
+    assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_run_query_ignores_sql_colon_inside_plan_text():
+    from filter_analytics import _run_query
+
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    raw = (
+        "PLAN: I will write SQL: a SELECT that keeps pickup-zone grain.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+    )
+    with patch("filter_analytics._llm_chat", return_value=raw), \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", return_value=rows):
+        mock_build.return_value = MagicMock()
+        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    assert result["plan"] == "I will write SQL: a SELECT that keeps pickup-zone grain."
+    assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
+
+
+def test_run_query_retry_message_includes_error_verbatim():
+    import duckdb
+    from filter_analytics import _run_query
+
+    with patch("filter_analytics._llm_chat", side_effect=[
+        "PLAN: Bad group by.\nSQL:\nSELECT pickup_borough, revenue FROM route_top_pickup_zones GROUP BY pickup_borough",
+        "PLAN: Corrected.\nSQL:\nSELECT pickup_zone, pickup_borough, revenue FROM route_top_pickup_zones LIMIT 20",
+    ]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=[
+             duckdb.BinderException('Binder Error: column "revenue" must appear in the GROUP BY clause'),
+             [{"pickup_zone": "Midtown", "pickup_borough": "Manhattan", "revenue": 100.0}],
+         ]):
+        mock_build.return_value = MagicMock()
+        _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    second_messages = mock_llm.call_args_list[1].args[0]
+    assert second_messages[-2]["role"] == "assistant"
+    assert second_messages[-2]["content"].startswith("PLAN: Bad group by.")
+    assert second_messages[-1]["role"] == "user"
+    assert 'Binder Error: column "revenue" must appear in the GROUP BY clause' in second_messages[-1]["content"]
+
+
+def test_run_query_reuses_connection_across_attempts():
+    import duckdb
+    from filter_analytics import _run_query
+
+    fake_conn = MagicMock()
+    with patch("filter_analytics._llm_chat", side_effect=[
+        "PLAN: First.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones",
+        "PLAN: Second.\nSQL:\nSELECT pickup_zone, revenue FROM route_top_pickup_zones LIMIT 20",
+    ]), \
+         patch("filter_analytics.duckdb.connect", return_value=fake_conn) as mock_connect, \
+         patch("filter_analytics._create_s3_secret", return_value="web_identity"), \
+         patch("filter_analytics._execute_sql", side_effect=[
+             duckdb.BinderException("first failure"),
+             [{"pickup_zone": "Midtown", "revenue": 100.0}],
+         ]):
+        _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+
+    mock_connect.assert_called_once()
+    fake_conn.close.assert_called_once()
 
 
 def test_validate_sql_passes_valid_select():
@@ -793,6 +1176,144 @@ async def test_stream_analytics_exact_table_match_skips_supervisor_llm():
     assert "confidence: high" in response
     assert "normalized table name matched" in response
     assert "I wasn't confident" not in response
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_yields_plan_block_between_table_and_sql():
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    registry = {"route_top_pickup_zones": {"tier": "route", "columns": [{"name": "pickup_zone", "type": "string"}, {"name": "revenue", "type": "double"}], "example_questions": [], "description": "Top zones"}}
+
+    async def fake_summary(*args, **kwargs):
+        yield "Midtown leads revenue."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "route_top_pickup_zones", "confidence": "high", "reasoning": "Top zones match"}), \
+         patch("filter_analytics._run_query", return_value={
+             "plan": "Use route_top_pickup_zones at pickup-zone grain.",
+             "sql": "SELECT pickup_zone, revenue FROM route_top_pickup_zones",
+             "rows": rows,
+             "capped": False,
+         }), \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics("show top zones", "bucket", "ap-southeast-1", "http://litellm", "private-chat", "", 300, 30, 200, None):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    assert "> **Plan:** Use route_top_pickup_zones at pickup-zone grain." in response
+    assert response.index("> **Table:**") < response.index("> **Plan:**") < response.index("> **SQL:**")
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_omits_plan_block_when_empty_or_missing():
+    rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
+    registry = {"route_top_pickup_zones": {"tier": "route", "columns": [{"name": "pickup_zone", "type": "string"}, {"name": "revenue", "type": "double"}], "example_questions": [], "description": "Top zones"}}
+
+    async def fake_summary(*args, **kwargs):
+        yield "Midtown leads revenue."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={"table": "route_top_pickup_zones", "confidence": "high", "reasoning": "Top zones match"}), \
+         patch("filter_analytics._run_query", return_value={
+             "sql": "SELECT pickup_zone, revenue FROM route_top_pickup_zones",
+             "rows": rows,
+             "capped": False,
+         }), \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics("show top zones", "bucket", "ap-southeast-1", "http://litellm", "private-chat", "", 300, 30, 200, None):
+            chunks.append(chunk)
+
+    assert "> **Plan:**" not in "".join(chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_analytics_pickup_borough_regression():
+    """The reported failure: a bare `revenue` SELECT with a borough GROUP BY
+    raises DuckDB BinderException on attempt 1; the corrected SELECT succeeds
+    on attempt 2. The stream must not raise, must include the Plan block, and
+    must surface the corrected SQL (not the buggy first attempt).
+    """
+    import duckdb
+
+    registry = {
+        "route_top_pickup_zones": {
+            "description": "Top pickup zones",
+            "tier": "route",
+            "columns": [
+                {"name": "pickup_zone", "type": "string"},
+                {"name": "pickup_borough", "type": "string"},
+                {"name": "revenue", "type": "double"},
+            ],
+            "example_questions": [],
+            "aliases": ["top pickup zones"],
+        }
+    }
+    rows = [
+        {"pickup_zone": "Midtown", "pickup_borough": "Manhattan", "revenue": 9_300.0},
+        {"pickup_zone": "JFK", "pickup_borough": "Queens", "revenue": 7_100.0},
+    ]
+    buggy_response = (
+        "PLAN: Group by borough to feed the borough chart, drop the zone column.\n"
+        "SQL:\n"
+        "SELECT pickup_borough, revenue FROM route_top_pickup_zones GROUP BY pickup_borough"
+    )
+    fixed_response = (
+        "PLAN: Pre-aggregated at zone grain — keep pickup_zone and pickup_borough "
+        "so the chart agent can group downstream.\n"
+        "SQL:\n"
+        "SELECT pickup_zone, pickup_borough, revenue "
+        "FROM route_top_pickup_zones ORDER BY revenue DESC LIMIT 20"
+    )
+    binder_exc = duckdb.BinderException(
+        'Binder Error: column "revenue" must appear in the GROUP BY clause or '
+        "must be part of an aggregate function."
+    )
+
+    async def fake_summary(*args, **kwargs):
+        yield "Midtown leads with $9.3K, JFK follows at $7.1K."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={
+             "table": "route_top_pickup_zones",
+             "confidence": "high",
+             "reasoning": "pickup zone leaderboard",
+         }), \
+         patch("filter_analytics._llm_chat", side_effect=[buggy_response, fixed_response]) as mock_llm, \
+         patch("filter_analytics._build_duckdb_conn") as mock_build, \
+         patch("filter_analytics._execute_sql", side_effect=[binder_exc, rows]) as mock_execute, \
+         patch("filter_analytics._run_chart_spec", return_value={
+             "type": "bar", "x": "pickup_borough", "y": "revenue",
+         }), \
+         patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        mock_build.return_value = MagicMock()
+        chunks: list[str] = []
+        async for chunk in _stream_analytics(
+            "List the top 20 pickup zones by total taxi revenue, represent a chart "
+            "of total revenue following pickup borough and conclude it",
+            "analytics-bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    response = "".join(chunks)
+    assert "> **Error:**" not in response, response
+    assert mock_llm.call_count == 2
+    assert mock_execute.call_count == 2
+    assert "> **Plan:** Pre-aggregated at zone grain" in response
+    assert "SELECT pickup_zone, pickup_borough, revenue" in response
+    assert "GROUP BY pickup_borough" not in response
+    assert response.index("> **Table:**") < response.index("> **Plan:**") < response.index("> **SQL:**")
 
 
 @pytest.mark.asyncio
