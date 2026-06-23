@@ -474,7 +474,7 @@ podDisruptionBudget:
 autoscaling:
   enabled: true
   minReplicas: 3
-  maxReplicas: 4
+  maxReplicas: 8
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
