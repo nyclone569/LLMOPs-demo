@@ -48,8 +48,16 @@ spec:
                   value: "100"
                 - name: BURST_RPM
                   value: "1000"
+                - name: CONCURRENCY
+                  value: "20"
                 - name: RUN_DURATION_S
                   value: "3300"
+                - name: RAMP_UP_S
+                  value: "120"
+                - name: MODEL_MIX
+                  value: "gpt-4o-mini=1"
+                - name: EXPENSIVE_MODEL
+                  value: "gpt-4o-mini"
                 - name: LONG_CONTEXT_RATE
                   value: "0.05"
                 - name: DUPLICATE_RATE
@@ -116,12 +124,18 @@ spec:
                   optional: false
             - name: TOTAL_USERS
               value: "290"
-            - name: BASE_RPM
+            - name: TARGET_RPM
               value: "20"
-            - name: BURST_RPM
-              value: "100"
+            - name: CONCURRENCY
+              value: "10"
             - name: RUN_DURATION_S
               value: "300"
+            - name: RAMP_UP_S
+              value: "60"
+            - name: MODEL_MIX
+              value: "gpt-4o-mini=1"
+            - name: EXPENSIVE_MODEL
+              value: "gpt-4o-mini"
           volumeMounts:
             - name: script
               mountPath: /app

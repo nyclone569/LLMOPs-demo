@@ -7,79 +7,43 @@ data:
   simulator.py: |
     #!/usr/bin/env python3
     """
-    LLMOps Traffic Simulator
-    Simulates 290 users across 5 teams sending requests to LiteLLM.
+    Worker-style LiteLLM traffic simulator for autoscaling validation.
     
-    Requirements §6 / §10:
-      - 290 simulated users, 5 teams
-      - 100 req/min base, 1000 req/min burst (10:00-10:30, 15:00-15:20)
-      - 5% long-context, 2% duplicate prompts, 3% provider failure simulation
-      - 1% sensitive prompt injection, 15% expensive-model requests
+    The simulator sends concurrent /chat/completions requests to LiteLLM with a
+    controlled target RPM, bounded concurrency, optional ramp-up, and configurable
+    request scenarios from docs/Requirements.md.
     """
     
+    from __future__ import annotations
+    
+    import itertools
+    import json
+    import logging
+    import math
     import os
     import random
-    import time
-    import logging
     import threading
-    import itertools
+    import time
+    from collections import Counter
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    from dataclasses import dataclass
     from datetime import datetime, timezone
-    from typing import Optional
+    from typing import Any
     
     import requests
     
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger(__name__)
     
-    # ── Configuration ──────────────────────────────────────────────────────────────
-    LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm.litellm.svc.cluster.local:4000")
-    LITELLM_API_KEY  = os.environ.get("LITELLM_API_KEY", "sk-1234")
     
-    TOTAL_USERS      = int(os.environ.get("TOTAL_USERS", "290"))
-    BASE_RPM         = int(os.environ.get("BASE_RPM", "100"))
-    BURST_RPM        = int(os.environ.get("BURST_RPM", "1000"))
-    RUN_DURATION_S   = int(os.environ.get("RUN_DURATION_S", "3600"))  # 1 hour default
-    
-    LONG_CONTEXT_RATE    = float(os.environ.get("LONG_CONTEXT_RATE", "0.05"))
-    DUPLICATE_RATE       = float(os.environ.get("DUPLICATE_RATE", "0.02"))
-    PROVIDER_FAIL_RATE   = float(os.environ.get("PROVIDER_FAIL_RATE", "0.03"))
-    SENSITIVE_RATE       = float(os.environ.get("SENSITIVE_RATE", "0.01"))
-    EXPENSIVE_RATE       = float(os.environ.get("EXPENSIVE_RATE", "0.15"))
-    
-    # Burst windows (UTC hour ranges)
-    BURST_WINDOWS = [
-        (2, 30),   # 10:00-10:30 SGT = 02:00-02:30 UTC
-        (7, 20),   # 15:00-15:20 SGT = 07:00-07:20 UTC
-    ]
-    
-    # ── Teams & model access ───────────────────────────────────────────────────────
     TEAMS = {
-        "engineering": {
-            "models": ["coding-assistant", "fast-chat", "long-context"],
-            "weight": 100,
-        },
-        "product": {
-            "models": ["fast-chat"],
-            "weight": 60,
-        },
-        "support": {
-            "models": ["fast-chat"],
-            "weight": 80,
-        },
-        "operations": {
-            "models": ["fast-chat"],
-            "weight": 30,
-        },
-        "executives": {
-            "models": ["fast-chat", "long-context"],
-            "weight": 20,
-        },
+        "engineering": {"models": ["coding-assistant", "fast-chat", "long-context"], "weight": 100},
+        "product": {"models": ["fast-chat"], "weight": 60},
+        "support": {"models": ["fast-chat"], "weight": 80},
+        "operations": {"models": ["fast-chat"], "weight": 30},
+        "executives": {"models": ["fast-chat", "long-context"], "weight": 20},
     }
     
-    # ── Prompt libraries ───────────────────────────────────────────────────────────
     NORMAL_PROMPTS = [
         "Summarize the key points from last week's sprint retrospective.",
         "Write a Python function to parse a JSON config file.",
@@ -104,9 +68,9 @@ data:
     ]
     
     LONG_CONTEXT_PROMPTS = [
-        "Read the following 50-page technical specification and extract all API endpoints: " + "X" * 8000,
-        "Summarize the following transcript from a 2-hour meeting: " + "discussion " * 2000,
-        "Review the following codebase and identify security vulnerabilities: " + "def process(): pass\n" * 500,
+        "Read this technical specification and extract all API endpoints: " + "X" * 8000,
+        "Summarize this long meeting transcript: " + "discussion " * 2000,
+        "Review this codebase and identify security vulnerabilities: " + "def process(): pass\n" * 500,
     ]
     
     SENSITIVE_PROMPTS = [
@@ -118,141 +82,365 @@ data:
     ]
     
     DUPLICATE_PROMPT = "What is the capital of France?"
+    BURST_WINDOWS_UTC = [(2, 30), (7, 20)]
+    _thread_local = threading.local()
     
-    # ── User pool ──────────────────────────────────────────────────────────────────
-    def build_users() -> list[dict]:
-        users = []
-        team_list = list(TEAMS.keys())
-        weights   = [TEAMS[t]["weight"] for t in team_list]
-        total_w   = sum(weights)
+    
+    def _env_int(name: str, default: int) -> int:
+        return int(os.environ.get(name, str(default)))
+    
+    
+    def _env_float(name: str, default: float) -> float:
+        return float(os.environ.get(name, str(default)))
+    
+    
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    
+    
+    def parse_model_mix(raw: str) -> list[tuple[str, float]]:
+        items: list[tuple[str, float]] = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" in part:
+                model, weight = part.split("=", 1)
+            elif ":" in part:
+                model, weight = part.split(":", 1)
+            else:
+                model, weight = part, "1"
+            model = model.strip()
+            parsed_weight = float(weight)
+            if not model or parsed_weight <= 0:
+                raise ValueError(f"Invalid MODEL_MIX entry: {part!r}")
+            items.append((model, parsed_weight))
+        if not items:
+            raise ValueError("MODEL_MIX must contain at least one model")
+        return items
+    
+    
+    @dataclass(frozen=True)
+    class Config:
+        litellm_base_url: str
+        litellm_api_key: str
+        total_users: int
+        target_rpm: int
+        base_rpm: int
+        burst_rpm: int
+        concurrency: int
+        run_duration_s: int
+        ramp_up_s: int
+        model_mix: list[tuple[str, float]]
+        long_context_rate: float
+        duplicate_rate: float
+        provider_fail_rate: float
+        expensive_rate: float
+        sensitive_rate: float
+        expensive_model: str
+        provider_failure_model: str
+        request_timeout_s: float
+        max_tokens: int
+        stats_interval_s: int
+        use_burst_windows: bool
+    
+        @classmethod
+        def from_env(cls) -> "Config":
+            target_rpm = _env_int("TARGET_RPM", _env_int("BASE_RPM", 100))
+            base_rpm = _env_int("BASE_RPM", target_rpm)
+            burst_rpm = _env_int("BURST_RPM", target_rpm)
+            return cls(
+                litellm_base_url=os.environ.get(
+                    "LITELLM_BASE_URL", "http://litellm.litellm.svc.cluster.local:4000"
+                ).rstrip("/"),
+                litellm_api_key=os.environ.get("LITELLM_API_KEY", "sk-1234"),
+                total_users=_env_int("TOTAL_USERS", 290),
+                target_rpm=target_rpm,
+                base_rpm=base_rpm,
+                burst_rpm=burst_rpm,
+                concurrency=_env_int("CONCURRENCY", 10),
+                run_duration_s=_env_int("RUN_DURATION_S", 300),
+                ramp_up_s=_env_int("RAMP_UP_S", 60),
+                model_mix=parse_model_mix(os.environ.get("MODEL_MIX", "gpt-4o-mini=1")),
+                long_context_rate=_env_float("LONG_CONTEXT_RATE", 0.05),
+                duplicate_rate=_env_float("DUPLICATE_RATE", 0.02),
+                provider_fail_rate=_env_float("PROVIDER_FAIL_RATE", 0.03),
+                expensive_rate=_env_float("EXPENSIVE_RATE", 0.15),
+                sensitive_rate=_env_float("SENSITIVE_RATE", 0.01),
+                expensive_model=os.environ.get("EXPENSIVE_MODEL", "gpt-4o-mini"),
+                provider_failure_model=os.environ.get("PROVIDER_FAILURE_MODEL", "nonexistent-model-failure-test"),
+                request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 60.0),
+                max_tokens=_env_int("MAX_TOKENS", 200),
+                stats_interval_s=_env_int("STATS_INTERVAL_S", 30),
+                use_burst_windows=_env_bool("USE_BURST_WINDOWS", "TARGET_RPM" not in os.environ),
+            )
+    
+    
+    def build_users(total_users: int | None = None) -> list[dict[str, str]]:
+        total = total_users if total_users is not None else _env_int("TOTAL_USERS", 290)
+        users: list[dict[str, str]] = []
+        teams = list(TEAMS.keys())
+        weights = [TEAMS[team]["weight"] for team in teams]
+        total_weight = sum(weights)
         allocated = 0
     
-        for i, team in enumerate(team_list):
-            count = round(TOTAL_USERS * weights[i] / total_w)
-            if i == len(team_list) - 1:
-                count = TOTAL_USERS - allocated
+        for index, team in enumerate(teams):
+            count = round(total * weights[index] / total_weight)
+            if index == len(teams) - 1:
+                count = total - allocated
             allocated += count
-            for j in range(count):
-                users.append({
-                    "id":   f"{team}-user-{j:03d}",
-                    "team": team,
-                })
+            for user_index in range(count):
+                users.append({"id": f"{team}-user-{user_index:03d}", "team": team})
         return users
     
-    USERS = build_users()
     
-    # ── Helpers ────────────────────────────────────────────────────────────────────
-    def is_burst_window() -> bool:
-        now = datetime.now(timezone.utc)
-        minute_of_day = now.hour * 60 + now.minute
-        for start_h, duration_m in BURST_WINDOWS:
-            start_m = start_h * 60
-            if start_m <= minute_of_day < start_m + duration_m:
+    def is_burst_window(now: datetime | None = None) -> bool:
+        current = now or datetime.now(timezone.utc)
+        minute_of_day = current.hour * 60 + current.minute
+        for start_hour, duration_minutes in BURST_WINDOWS_UTC:
+            start_minute = start_hour * 60
+            if start_minute <= minute_of_day < start_minute + duration_minutes:
                 return True
         return False
     
     
-    def pick_model(user: dict) -> str:
-        allowed = TEAMS[user["team"]]["models"]
-    
-        r = random.random()
-        if r < EXPENSIVE_RATE and "coding-assistant" in allowed:
-            return "coding-assistant"
-        if r < EXPENSIVE_RATE + LONG_CONTEXT_RATE and "long-context" in allowed:
-            return "long-context"
-        return random.choice(allowed)
+    def current_target_rpm(config: Config, elapsed_s: float) -> float:
+        raw_rpm = config.burst_rpm if config.use_burst_windows and is_burst_window() else config.target_rpm
+        if config.ramp_up_s <= 0:
+            return float(raw_rpm)
+        ramp_fraction = min(1.0, max(0.01, elapsed_s / config.ramp_up_s))
+        return max(1.0, raw_rpm * ramp_fraction)
     
     
-    def pick_prompt() -> str:
-        r = random.random()
-        if r < SENSITIVE_RATE:
-            return random.choice(SENSITIVE_PROMPTS)
-        if r < SENSITIVE_RATE + DUPLICATE_RATE:
-            return DUPLICATE_PROMPT
-        if r < SENSITIVE_RATE + DUPLICATE_RATE + LONG_CONTEXT_RATE:
-            return random.choice(LONG_CONTEXT_PROMPTS)
-        return random.choice(NORMAL_PROMPTS)
+    def weighted_choice(items: list[tuple[str, float]]) -> str:
+        total = sum(weight for _, weight in items)
+        threshold = random.uniform(0, total)
+        upto = 0.0
+        for item, weight in items:
+            upto += weight
+            if upto >= threshold:
+                return item
+        return items[-1][0]
     
     
-    def send_request(user: dict, session: requests.Session) -> Optional[dict]:
-        model  = pick_model(user)
-        prompt = pick_prompt()
+    def pick_prompt(config: Config) -> tuple[str, str]:
+        roll = random.random()
+        if roll < config.sensitive_rate:
+            return random.choice(SENSITIVE_PROMPTS), "sensitive"
+        roll -= config.sensitive_rate
+        if roll < config.duplicate_rate:
+            return DUPLICATE_PROMPT, "duplicate"
+        roll -= config.duplicate_rate
+        if roll < config.long_context_rate:
+            return random.choice(LONG_CONTEXT_PROMPTS), "long_context"
+        return random.choice(NORMAL_PROMPTS), "normal"
     
-        # Simulate provider failure: send to a non-existent model occasionally
-        if random.random() < PROVIDER_FAIL_RATE:
-            model = "nonexistent-model-failure-test"
     
-        payload = {
+    def build_payload(user: dict[str, str], config: Config) -> dict[str, Any]:
+        model = weighted_choice(config.model_mix)
+        scenario_tags: list[str] = []
+    
+        if random.random() < config.expensive_rate:
+            model = config.expensive_model
+            scenario_tags.append("expensive_model")
+    
+        if random.random() < config.provider_fail_rate:
+            model = config.provider_failure_model
+            scenario_tags.append("provider_failure_injected")
+    
+        prompt, prompt_scenario = pick_prompt(config)
+        scenario_tags.append(prompt_scenario)
+    
+        return {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 200,
+            "max_tokens": config.max_tokens,
             "user": user["id"],
-            "metadata": {"team": user["team"]},
+            "metadata": {
+                "team": user["team"],
+                "load_test": True,
+                "scenario": ",".join(scenario_tags),
+            },
         }
+    
+    
+    class Metrics:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self.requests = 0
+            self.successes = 0
+            self.errors = 0
+            self.timeouts = 0
+            self.injected_provider_failures = 0
+            self.status_counts: Counter[int] = Counter()
+            self.model_counts: Counter[str] = Counter()
+            self.latencies: list[float] = []
+    
+        def record(
+            self,
+            *,
+            status: int,
+            latency_s: float,
+            model: str,
+            timeout: bool = False,
+            injected_provider_failure: bool = False,
+        ) -> None:
+            with self._lock:
+                self.requests += 1
+                if 200 <= status < 300:
+                    self.successes += 1
+                else:
+                    self.errors += 1
+                if timeout:
+                    self.timeouts += 1
+                if injected_provider_failure:
+                    self.injected_provider_failures += 1
+                self.status_counts[status] += 1
+                self.model_counts[model] += 1
+                self.latencies.append(round(latency_s, 4))
+    
+        @staticmethod
+        def _percentile(values: list[float], percentile: float) -> float:
+            if not values:
+                return 0.0
+            ordered = sorted(values)
+            if percentile == 50:
+                midpoint = len(ordered) // 2
+                if len(ordered) % 2:
+                    return ordered[midpoint]
+                return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+            rank = max(1, math.ceil((percentile / 100.0) * len(ordered)))
+            return ordered[min(rank - 1, len(ordered) - 1)]
+    
+        def summary(self, elapsed_s: float) -> dict[str, Any]:
+            with self._lock:
+                latencies = list(self.latencies)
+                requests = self.requests
+                return {
+                    "requests": requests,
+                    "successes": self.successes,
+                    "errors": self.errors,
+                    "error_rate": round(self.errors / requests, 4) if requests else 0.0,
+                    "timeouts": self.timeouts,
+                    "injected_provider_failures": self.injected_provider_failures,
+                    "status_counts": dict(sorted(self.status_counts.items())),
+                    "model_counts": dict(sorted(self.model_counts.items())),
+                    "latency_p50_s": round(self._percentile(latencies, 50), 4),
+                    "latency_p95_s": round(self._percentile(latencies, 95), 4),
+                    "latency_p99_s": round(self._percentile(latencies, 99), 4),
+                    "elapsed_s": round(elapsed_s, 1),
+                    "actual_rpm": round((requests / elapsed_s) * 60, 2) if elapsed_s > 0 else 0.0,
+                }
+    
+    
+    def get_session() -> requests.Session:
+        session = getattr(_thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            _thread_local.session = session
+        return session
+    
+    
+    def send_request(user: dict[str, str], config: Config, metrics: Metrics) -> None:
+        payload = build_payload(user, config)
+        model = str(payload["model"])
+        scenario = payload["metadata"].get("scenario", "")
+        injected_provider_failure = "provider_failure_injected" in scenario
         headers = {
-            "Authorization": f"Bearer {LITELLM_API_KEY}",
-            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {config.litellm_api_key}",
+            "Content-Type": "application/json",
         }
+        timeout = False
+        started = time.monotonic()
     
         try:
-            t0 = time.monotonic()
-            resp = session.post(
-                f"{LITELLM_BASE_URL}/chat/completions",
+            response = get_session().post(
+                f"{config.litellm_base_url}/chat/completions",
                 json=payload,
                 headers=headers,
-                timeout=60,
+                timeout=config.request_timeout_s,
             )
-            latency = time.monotonic() - t0
-    
-            if resp.status_code == 200:
-                log.info("OK model=%s user=%s latency=%.2fs", model, user["id"], latency)
-            else:
-                log.warning("ERR model=%s user=%s status=%d body=%s",
-                            model, user["id"], resp.status_code, resp.text[:200])
-            return {"status": resp.status_code, "latency": latency, "model": model}
-    
+            status = response.status_code
+            if not 200 <= status < 300:
+                log.warning("request_error status=%s model=%s scenario=%s body=%s", status, model, scenario, response.text[:200])
         except requests.exceptions.Timeout:
-            log.warning("TIMEOUT model=%s user=%s", model, user["id"])
-            return {"status": 0, "latency": 60.0, "model": model, "error": "timeout"}
-        except Exception as exc:
-            log.error("EXCEPTION model=%s user=%s err=%s", model, user["id"], exc)
-            return {"status": 0, "latency": 0.0, "model": model, "error": str(exc)}
+            status = 0
+            timeout = True
+            log.warning("request_timeout model=%s scenario=%s", model, scenario)
+        except Exception as exc:  # pragma: no cover - defensive for network/runtime errors
+            status = 0
+            log.warning("request_exception model=%s scenario=%s error=%s", model, scenario, exc)
+    
+        latency = time.monotonic() - started
+        metrics.record(
+            status=status,
+            latency_s=latency,
+            model=model,
+            timeout=timeout,
+            injected_provider_failure=injected_provider_failure,
+        )
     
     
-    # ── Main loop ──────────────────────────────────────────────────────────────────
-    def run_simulation():
-        session     = requests.Session()
-        user_cycle  = itertools.cycle(USERS)
-        start_time  = time.monotonic()
-        req_count   = 0
-        err_count   = 0
+    def log_summary(metrics: Metrics, start_time: float, *, final: bool = False) -> None:
+        summary = metrics.summary(time.monotonic() - start_time)
+        prefix = "FINAL_STATS" if final else "STATS"
+        log.info("%s %s", prefix, json.dumps(summary, sort_keys=True))
     
-        log.info("Starting simulation: %d users, %d base RPM, %d burst RPM, %ds duration",
-                 TOTAL_USERS, BASE_RPM, BURST_RPM, RUN_DURATION_S)
     
-        while time.monotonic() - start_time < RUN_DURATION_S:
-            rpm        = BURST_RPM if is_burst_window() else BASE_RPM
-            interval_s = 60.0 / rpm
+    def run_simulation(config: Config | None = None) -> dict[str, Any]:
+        cfg = config or Config.from_env()
+        users = build_users(cfg.total_users)
+        user_cycle = itertools.cycle(users)
+        metrics = Metrics()
+        start_time = time.monotonic()
+        deadline = start_time + cfg.run_duration_s
+        next_submit_at = start_time
+        next_stats_at = start_time + cfg.stats_interval_s
+        futures = set()
     
-            user   = next(user_cycle)
-            result = send_request(user, session)
+        log.info(
+            "Starting LiteLLM load test users=%s target_rpm=%s concurrency=%s duration_s=%s ramp_up_s=%s model_mix=%s",
+            cfg.total_users,
+            cfg.target_rpm,
+            cfg.concurrency,
+            cfg.run_duration_s,
+            cfg.ramp_up_s,
+            cfg.model_mix,
+        )
     
-            req_count += 1
-            if result and result.get("status", 0) not in (200, 201):
-                err_count += 1
+        with ThreadPoolExecutor(max_workers=cfg.concurrency) as executor:
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                done = {future for future in futures if future.done()}
+                futures.difference_update(done)
     
-            if req_count % 100 == 0:
-                elapsed = time.monotonic() - start_time
-                log.info("STATS requests=%d errors=%d error_rate=%.1f%% elapsed=%.0fs",
-                         req_count, err_count,
-                         100.0 * err_count / req_count if req_count else 0,
-                         elapsed)
+                if now >= next_stats_at:
+                    log_summary(metrics, start_time)
+                    next_stats_at = now + cfg.stats_interval_s
     
-            time.sleep(max(0, interval_s))
+                if len(futures) >= cfg.concurrency:
+                    done, futures = wait(futures, timeout=0.5, return_when=FIRST_COMPLETED)
+                    futures = set(futures)
+                    continue
     
-        log.info("Simulation complete: %d requests, %d errors (%.1f%%)",
-                 req_count, err_count,
-                 100.0 * err_count / req_count if req_count else 0)
+                if now < next_submit_at:
+                    time.sleep(min(0.25, next_submit_at - now))
+                    continue
+    
+                elapsed = now - start_time
+                rpm = current_target_rpm(cfg, elapsed)
+                interval_s = 60.0 / max(rpm, 1.0)
+                futures.add(executor.submit(send_request, next(user_cycle), cfg, metrics))
+                next_submit_at = now + interval_s
+    
+            if futures:
+                wait(futures)
+    
+        log_summary(metrics, start_time, final=True)
+        return metrics.summary(time.monotonic() - start_time)
     
     
     if __name__ == "__main__":
