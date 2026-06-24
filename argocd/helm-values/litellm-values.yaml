@@ -318,6 +318,10 @@ config:
     redact_messages_in_exceptions: true
     turn_off_message_logging: false
 
+    # Allow Prometheus to scrape /metrics without the master key.
+    # Safe: /metrics is ClusterIP-only, not exposed via Ingress.
+    require_auth_for_metrics_endpoint: false
+
     # Request handling
     drop_params: true
     max_parallel_requests: 100
