@@ -85,10 +85,10 @@ langfuse:
   # ============================================================================
   resources:
     requests:
-      memory: "256Mi"
+      memory: "512Mi"
       cpu: "200m"
     limits:
-      memory: "512Mi"
+      memory: "1Gi"
       cpu: "500m"
 
   # ============================================================================
@@ -134,10 +134,10 @@ langfuse:
       targetCPUUtilizationPercentage: 70
     resources:
       requests:
-        memory: "256Mi"
+        memory: "512Mi"
         cpu: "200m"
       limits:
-        memory: "512Mi"
+        memory: "1Gi"
         cpu: "500m"
 
   # ============================================================================

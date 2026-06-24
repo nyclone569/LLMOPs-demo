@@ -207,6 +207,11 @@ spec:
             nodeExporterRecording: true
             prometheus: true
             prometheusOperator: true
+          # EKS manages the control plane; these endpoints are unreachable
+          # from the data plane so the alerts are permanent false positives.
+          disabled:
+            KubeControllerManagerDown: true
+            KubeSchedulerDown: true
 
   # Destination: monitoring namespace
   destination:
