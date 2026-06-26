@@ -51,6 +51,12 @@ langfuse:
     - name: CLICKHOUSE_CLUSTER_ENABLED
       value: "false"
 
+    # Cap Node.js heap below container memory limit so GC runs before OOMKill.
+    # Formula: ~85% of memory limit (1Gi = 1024Mi → 870Mi).
+    # Without this, Node.js defaults to ~1.5Gi heap and gets killed at 1Gi limit.
+    - name: NODE_OPTIONS
+      value: "--max-old-space-size=870"
+
     - name: LANGFUSE_S3_ACCESS_KEY_ID
       valueFrom:
         secretKeyRef:
@@ -88,7 +94,7 @@ langfuse:
       memory: "512Mi"
       cpu: "200m"
     limits:
-      memory: "1Gi"
+      memory: "1536Mi"  # increased from 1Gi; NODE_OPTIONS capped at 870Mi keeps GC safe
       cpu: "500m"
 
   # ============================================================================
@@ -130,14 +136,15 @@ langfuse:
     hpa:
       enabled: true
       minReplicas: 2
-      maxReplicas: 3
+      maxReplicas: 4      # increased from 3; worker is the bottleneck under high trace load
       targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80  # add memory trigger — worker OOMs before CPU spikes
     resources:
       requests:
         memory: "512Mi"
         cpu: "200m"
       limits:
-        memory: "1Gi"
+        memory: "1536Mi"  # increased from 1Gi, matches web limit
         cpu: "500m"
 
   # ============================================================================

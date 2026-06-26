@@ -105,7 +105,7 @@ resource "aws_eks_node_group" "workload" {
   }
 }
 
-# GPU Node Group - For Ollama LLM inference
+# GPU Node Group - Reserved for future GPU workloads (Ollama removed, desired=0)
   resource "aws_eks_node_group" "gpu" {
     cluster_name    = module.eks.cluster_name
     node_group_name = "${var.cluster_name}-gpu"
@@ -113,7 +113,7 @@ resource "aws_eks_node_group" "workload" {
     subnet_ids      = data.terraform_remote_state.vpc.outputs.private_subnet_ids
 
     scaling_config {
-      desired_size = 1
+      desired_size = 0
       min_size     = 0
       max_size     = 1
     }

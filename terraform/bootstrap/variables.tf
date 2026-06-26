@@ -74,3 +74,10 @@ variable "argocd_ingress_host" {
   type        = string
   default     = "argocd.example.com"
 }
+
+# Cluster Autoscaler
+variable "cluster_autoscaler_version" {
+  description = "Cluster Autoscaler Helm chart version"
+  type        = string
+  default     = "9.37.0"
+}

@@ -20,10 +20,10 @@ replicaCount: 3
 resources:
   requests:
     memory: "1100Mi"
-    cpu: "200m"
+    cpu: "100m"   # reduced from 200m — easier to schedule; limit handles actual burst
   limits:
     memory: "2Gi"
-    cpu: "500m"
+    cpu: "1000m"  # increased from 500m — prevents CPU throttle under 100-500 RPM load
 
 # ============================================================================
 # ENVIRONMENT VARIABLES
@@ -477,10 +477,10 @@ podDisruptionBudget:
 # ============================================================================
 autoscaling:
   enabled: true
-  minReplicas: 3
-  maxReplicas: 8
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 90
+  minReplicas: 2                       # reduced from 3; 2 pods idle is enough baseline
+  maxReplicas: 5                       # reduced from 8; 5×100m=500m request fits t3.medium
+  targetCPUUtilizationPercentage: 50   # lowered from 70% — scale before throttle hits
+  targetMemoryUtilizationPercentage: 80
 
 # ============================================================================
 # LABELS

@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from analytics_agent.ollama_client import chat, strip_fences
+from analytics_agent.gpt_client import chat, strip_fences
 from analytics_agent.registry import registry_as_prompt_text
 
 SYSTEM_PROMPT = """You are a table selection agent for NYC yellow cab trip analytics.

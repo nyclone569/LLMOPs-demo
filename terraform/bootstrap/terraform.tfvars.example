@@ -19,6 +19,9 @@ metrics_server_version = "3.11.0"
 
 # ArgoCD
 argocd_version          = "5.51.6"
-argocd_admin_password   = "" # Leave empty to auto-generate
+argocd_admin_password   = "admin123" # Leave empty to auto-generate
 argocd_ingress_enabled  = true
 argocd_ingress_host     = "argocd.llmops-platform.com"
+
+# Cluster Autoscaler
+cluster_autoscaler_version = "9.37.0"

@@ -67,9 +67,9 @@ def test_pipeline_log_has_correlation_id():
     assert result.log["correlation_id"] == result.correlation_id
 
 
-def test_pipeline_returns_error_on_ollama_unavailable():
-    from analytics_agent.ollama_client import OllamaError
-    with patch("analytics_agent.pipeline.run_supervisor", side_effect=OllamaError("timed out")):
+def test_pipeline_returns_error_on_llm_unavailable():
+    from analytics_agent.gpt_client import LLMClientError
+    with patch("analytics_agent.pipeline.run_supervisor", side_effect=LLMClientError("timed out")):
         result = run_pipeline("show monthly revenue", REGISTRY)
     assert result.error is not None
     assert "timed out" in result.error

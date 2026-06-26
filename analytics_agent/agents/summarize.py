@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from analytics_agent.ollama_client import chat
+from analytics_agent.gpt_client import chat
 
 VALID_CHART_TYPES = {"bar", "line", "pie", "table"}
 

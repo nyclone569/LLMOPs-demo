@@ -40,7 +40,7 @@ def validate_sql(sql: str, expected_table: str, known_tables: set[str]) -> None:
 
 import signal
 from dataclasses import dataclass
-from analytics_agent.ollama_client import chat, strip_fences
+from analytics_agent.gpt_client import chat, strip_fences
 from analytics_agent.registry import get_table_schema
 from analytics_agent.config import S3_BUCKET, DUCKDB_TIMEOUT, ROW_CAP
 

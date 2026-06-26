@@ -112,3 +112,41 @@ variable "cluster_enabled_log_types" {
   type        = list(string)
   default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 }
+
+# ── Scheduled Scaling ─────────────────────────────────────────────────────────
+
+variable "enable_scheduled_scaling" {
+  description = "Enable scheduled scaling for workload node group (aligns with simulator burst windows)"
+  type        = bool
+  default     = true
+}
+
+variable "peak_desired" {
+  description = "Desired node count during peak hours (09:00–09:30 and 14:00–14:20 ICT)"
+  type        = number
+  default     = 4
+}
+
+variable "peak_min" {
+  description = "Minimum node count during peak — prevents CA from scaling down mid-burst"
+  type        = number
+  default     = 3
+}
+
+variable "warmup_desired" {
+  description = "Desired node count during pre-peak warm-up window (30 min before burst)"
+  type        = number
+  default     = 3
+}
+
+variable "offpeak_desired" {
+  description = "Desired node count during off-peak hours (lunch, evening, weekend)"
+  type        = number
+  default     = 2
+}
+
+variable "offpeak_min" {
+  description = "Minimum node count during off-peak — baseline for CA scale-down floor"
+  type        = number
+  default     = 2
+}

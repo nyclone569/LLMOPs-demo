@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from analytics_agent.agents.supervisor import run_supervisor, SupervisorError
 from analytics_agent.agents.query import run_query_agent, QueryError
 from analytics_agent.agents.summarize import run_summarize_agent, SummarizeError
-from analytics_agent.ollama_client import OllamaError
+from analytics_agent.gpt_client import LLMClientError
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def run_pipeline(question: str, registry: dict) -> PipelineResult:
             log=log,
         )
 
-    except (SupervisorError, QueryError, SummarizeError, OllamaError) as e:
+    except (SupervisorError, QueryError, SummarizeError, LLMClientError) as e:
         log["error"] = str(e)
         log["total_latency_ms"] = int((time.monotonic() - t0) * 1000)
         log["outcome"] = "error"
