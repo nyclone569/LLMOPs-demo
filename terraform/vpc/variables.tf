@@ -63,7 +63,7 @@ variable "private_subnet_cidrs" {
 variable "cluster_name" {
   description = "Name of the EKS cluster for subnet tagging"
   type        = string
-  default     = "llmops-platform-eks"
+  default     = "llmops-cluster"
 }
 
 variable "single_nat_gateway" {

@@ -7,7 +7,7 @@ environment  = "dev"
 
 # EKS Cluster Configuration
 cluster_name       = "llmops-cluster"
-kubernetes_version = "1.29"
+kubernetes_version = "1.32"
 
 # Cluster Endpoint Access
 cluster_endpoint_private_access      = true

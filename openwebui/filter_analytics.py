@@ -275,8 +275,13 @@ def _normalize_duckdb_sql(sql: str) -> str:
     )
 
 
-def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
-    stripped = sql.strip().rstrip(";").strip()
+def _validate_sql(
+    sql: str,
+    primary_table: str,
+    known_tables: set[str],
+    allowed_tables: set[str],
+) -> None:
+    stripped = sql.strip()
     if _FILE_FUNCTIONS.search(stripped):
         raise SQLValidationError(
             "file function not allowed (read_parquet, httpfs, COPY, etc.)"
@@ -288,8 +293,13 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
         raise SQLValidationError("DDL keywords not allowed")
     if ";" in stripped:
         raise SQLValidationError("chained statements not allowed")
-    if expected_table not in known_tables:
-        raise SQLValidationError(f"Table '{expected_table}' not in registry")
+    known_tables_lower = {table.lower() for table in known_tables}
+    allowed_tables_lower = {table.lower() for table in allowed_tables}
+    if primary_table.lower() not in known_tables_lower:
+        raise SQLValidationError(f"Table '{primary_table}' not in registry")
+    for table in allowed_tables:
+        if table.lower() not in known_tables_lower:
+            raise SQLValidationError(f"Table '{table}' not in registry")
     found = set(re.findall(r"\bFROM\s+(\w+)", stripped, re.IGNORECASE))
     found |= set(re.findall(r"\bJOIN\s+(\w+)", stripped, re.IGNORECASE))
     # CTE names are valid references — exclude them from the foreign-table check
@@ -297,10 +307,11 @@ def _validate_sql(sql: str, expected_table: str, known_tables: set) -> None:
         m.lower()
         for m in re.findall(r"\bWITH\s+(\w+)\s+AS\s*\(", stripped, re.IGNORECASE)
     }
+    allowed_table_list = "', '".join(sorted(allowed_tables))
     for t in found:
-        if t.lower() != expected_table.lower() and t.lower() not in cte_names:
+        if t.lower() not in allowed_tables_lower and t.lower() not in cte_names:
             raise SQLValidationError(
-                f"Table '{t}' not allowed — expected '{expected_table}'"
+                f"Table '{t}' not allowed — expected one of '{allowed_table_list}'"
             )
 
 
@@ -958,8 +969,20 @@ Dataset tiers:
 Borough names: Manhattan, Brooklyn, Queens, Bronx, Staten Island.
 Revenue = total_fare_amount (excludes tips). Peak hours = 7-9am and 5-8pm.
 
-Select ONE table. Output ONLY valid JSON, no explanation:
-{"table": "<table_name>", "confidence": "high|low", "reasoning": "<one sentence>"}"""
+Select the minimal table set. Output ONLY valid JSON, no explanation:
+{"tables": ["<primary>", "<secondary_if_needed>"], "join_hint": "<optional ON clause or null>", "confidence": "high|low", "reasoning": "<one sentence>"}
+
+Rules:
+- Prefer pre-aggregated tables that already include dimension labels.
+- Use 2 tables only when the question explicitly needs a dimension lookup, such as zone names, borough labels, or vendor names, and no selected pre-aggregated table already has those labels.
+- Use the fact/kpi/route/ops table as the first table and the dim_* lookup as the second table.
+- Keep join_hint null for single-table answers.
+
+Examples:
+Q: trips by zone group name
+{"tables": ["kpi_zone_performance", "dim_zone_grouped"], "join_hint": "JOIN dim_zone_grouped d ON t.location_id = d.location_id", "confidence": "high", "reasoning": "The question needs group labels from a lookup table."}
+Q: monthly revenue
+{"tables": ["kpi_monthly_summary"], "join_hint": null, "confidence": "high", "reasoning": "Monthly revenue is already available in the monthly KPI table."}"""
 
 
 def _as_list(value) -> list[str]:
@@ -1125,10 +1148,21 @@ def _candidate_registry(registry: dict, candidates: list[dict]) -> dict:
     }
 
 
+def _needs_dimension_lookup(question: str) -> bool:
+    """Return True when exact table routing should still allow dim-table selection."""
+    normalized = _normalize_match_text(question)
+    dimension_terms = {"zone", "vendor", "borough", "service zone", "group"}
+    lookup_terms = {"name", "names", "label", "labels", "lookup"}
+    return any(term in normalized for term in dimension_terms) and any(
+        term in normalized for term in lookup_terms
+    )
+
+
 def _supervisor_from_exact_candidate(candidate: dict) -> dict:
     reason = "; ".join(candidate.get("reasons", [])) or "exact table match"
     return {
-        "table": candidate["table"],
+        "tables": [candidate["table"]],
+        "join_hint": None,
         "confidence": "high",
         "reasoning": reason,
     }
@@ -1141,7 +1175,7 @@ def _run_supervisor(
     litellm_model: str = LITELLM_MODEL,
     api_key: str = "",
 ) -> dict:
-    """Returns {"table": str, "confidence": "high|low", "reasoning": str}."""
+    """Returns {"tables": list[str], "join_hint": str | None, "confidence": "high|low", "reasoning": str}."""
     registry_text = _registry_as_prompt(registry)
     messages = [
         {"role": "system", "content": _SUPERVISOR_SYSTEM},
@@ -1155,21 +1189,31 @@ def _run_supervisor(
     )
     cleaned = _strip_fences(raw)
     parsed = json.loads(cleaned.strip())
-    table = parsed.get("table", "")
-    if table not in registry:
+    tables = _as_list(parsed.get("tables"))
+    if not tables and parsed.get("table"):
+        tables = _as_list(parsed.get("table"))
+    invalid_tables = [table for table in tables if table not in registry]
+    if not tables or invalid_tables:
         return {
-            "table": "",
+            "tables": [],
+            "join_hint": None,
             "confidence": "low",
             "reasoning": (
-                "Requested data did not match an available table; selected table is not listed in the registry: "
-                f"{table or 'unknown'}"
+                "Requested data did not match available tables; selected table is not listed in the registry: "
+                f"{', '.join(invalid_tables) if invalid_tables else 'unknown'}"
             ),
         }
     confidence = parsed.get("confidence", "low")
     if confidence not in ("high", "low"):
         confidence = "low"
+    join_hint = parsed.get("join_hint")
+    if isinstance(join_hint, str) and join_hint.strip().lower() in {"", "null", "none"}:
+        join_hint = None
+    if len(tables) == 1:
+        join_hint = None
     return {
-        "table": table,
+        "tables": tables,
+        "join_hint": join_hint,
         "confidence": confidence,
         "reasoning": parsed.get("reasoning", ""),
     }
@@ -1269,18 +1313,29 @@ def _execute_sql(conn, sql_capped: str) -> list[dict]:
     return conn.execute(sql_capped).fetchdf().to_dict(orient="records")
 
 
-def _build_duckdb_conn(table: str, s3_bucket: str, aws_region: str):
+def _build_duckdb_conn(
+    tables: list[str],
+    s3_bucket: str,
+    aws_region: str,
+) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(
         config={
             "memory_limit": "512MB",
             "extension_directory": "/tmp/duckdb-extensions",
         }
     )
-    path = f"s3://{s3_bucket}/{table}/*.parquet"
+    if len(tables) > 2:
+        print(f"[analytics-pipe] Warning: mounting {len(tables)} DuckDB tables")
     conn.execute("INSTALL httpfs; LOAD httpfs;")
     auth_mode = _create_s3_secret(conn, aws_region)
-    print(f"DuckDB S3 auth mode: {auth_mode}; path: {path}")
-    conn.execute(f"CREATE VIEW {table} AS SELECT * FROM read_parquet('{path}')")
+    for table in tables:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table):
+            raise ValueError(f"Invalid DuckDB table name: {table!r}")
+        path = f"s3://{s3_bucket}/{table}/*.parquet"
+        print(f"DuckDB S3 auth mode: {auth_mode}; table: {table}; path: {path}")
+        conn.execute(
+            f"CREATE VIEW {table} AS SELECT * FROM read_parquet({_sql_literal(path)})"
+        )
     return conn
 
 
@@ -1288,7 +1343,7 @@ _QUERY_SYSTEM = """You are a SQL query agent for NYC yellow cab trip analytics o
 
 OUTPUT CONTRACT
 First, write a short PLAN paragraph (2-4 lines) covering:
-- which columns from the table answer the question
+- which columns from the selected table(s) answer the question
 - the grain you are answering at (row-level vs aggregated)
 - any aggregation/GROUP BY you intend to use
 - if the question conflicts (e.g. asks for two grains), which one you chose and why
@@ -1298,6 +1353,13 @@ GROUP BY RULES
 - Every non-aggregated column in SELECT must appear in GROUP BY.
 - If a column is already a measure on a pre-aggregated table (revenue, trip_count, avg_fare etc. on kpi_*/route_*/ops_*), do NOT re-aggregate unless rolling up to a coarser grain.
 - When rolling up: SUM measures, AVG only ratios with care, COUNT(*) for trip_count rollups.
+
+JOIN RULES
+- JOIN only when the question requires a label/name that is not in the primary table.
+- Use dim_* tables for zone/vendor/name lookups.
+- Always alias tables: t for the primary table and d for the dimension table.
+- If Join Hint is provided, use it exactly.
+- Prefer a single-table query when the primary table already has the needed label columns.
 
 DUCKDB DIALECT
 - Recent windows: CURRENT_DATE - INTERVAL 7 DAY (not DATE_SUB)
@@ -1331,12 +1393,25 @@ SELECT DATE_TRUNC('week', pickup_date) AS week,
 FROM fact_trips_daily
 WHERE pickup_date >= CURRENT_DATE - INTERVAL 56 DAY
 GROUP BY 1
-ORDER BY 1"""
+ORDER BY 1
+
+Q: top zone groups by pickups
+Primary Table: kpi_zone_performance
+Tables: kpi_zone_performance, dim_zone_grouped
+Join Hint: JOIN dim_zone_grouped d ON t.location_id = d.location_id
+PLAN: kpi_zone_performance has pickup counts by location_id, while dim_zone_grouped supplies the group_name label requested by the question. Join exactly on the provided location_id condition and aggregate pickups by group_name.
+SQL:
+SELECT d.group_name, SUM(t.pickups) AS pickups
+FROM kpi_zone_performance t
+JOIN dim_zone_grouped d ON t.location_id = d.location_id
+GROUP BY 1
+ORDER BY pickups DESC"""
 
 
 def _run_query(
     question: str,
-    table: str,
+    tables: list[str],
+    join_hint: str | None,
     registry: dict,
     s3_bucket: str,
     aws_region: str = AWS_REGION,
@@ -1345,21 +1420,39 @@ def _run_query(
     api_key: str = "",
 ) -> dict:
     """Returns {"sql": str, "plan": str, "rows": list[dict], "capped": bool}."""
-    schema = registry[table]
+    if not tables:
+        raise ValueError("At least one table is required")
+    primary_table = tables[0]
+    allowed_tables = set(tables)
+    for table in tables:
+        if table not in registry:
+            raise ValueError(f"Table '{table}' not in registry")
     if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d+", aws_region):
         raise ValueError(f"Invalid aws_region format: {aws_region!r}")
     if not re.fullmatch(r"[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]", s3_bucket):
         raise ValueError(f"Invalid s3_bucket: {s3_bucket!r}")
-    col_text = ", ".join(f"{c['name']} ({c['type']})" for c in schema["columns"])
+    col_text = "\n".join(
+        "Table "
+        f"{table}: "
+        + ", ".join(f"{c['name']} ({c['type']})" for c in registry[table]["columns"])
+        for table in tables
+    )
+    join_hint_text = join_hint if join_hint else "null"
     messages: list[dict] = [
         {"role": "system", "content": _QUERY_SYSTEM},
         {
             "role": "user",
-            "content": f"Table: {table}\nColumns: {col_text}\n\nQuestion: {question}",
+            "content": (
+                f"Primary Table: {primary_table}\n"
+                f"Tables: {', '.join(tables)}\n"
+                f"Join Hint: {join_hint_text}\n"
+                f"Columns:\n{col_text}\n\n"
+                f"Question: {question}"
+            ),
         },
     ]
 
-    conn = _build_duckdb_conn(table, s3_bucket, aws_region)
+    conn = _build_duckdb_conn(tables, s3_bucket, aws_region)
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
             for attempt in range(2):
@@ -1371,10 +1464,10 @@ def _run_query(
                 )
                 stripped = _strip_fences(raw)
                 plan, sql = _split_plan_and_sql(stripped)
-                sql = _normalize_duckdb_sql(sql.rstrip(";").strip())
+                sql = _normalize_duckdb_sql(sql.strip())
 
                 try:
-                    _validate_sql(sql, table, set(registry.keys()))
+                    _validate_sql(sql, primary_table, set(registry.keys()), allowed_tables)
                     sql_capped, _ = _wrap_with_limit(sql)
                     future = executor.submit(_execute_sql, conn, sql_capped)
                     try:
@@ -1398,7 +1491,7 @@ def _run_query(
                             attempts=2,
                         ) from exc
                     messages.append({"role": "assistant", "content": raw})
-                    messages.append({"role": "user", "content": _retry_prompt(exc, table)})
+                    messages.append({"role": "user", "content": _retry_prompt(exc, primary_table)})
     finally:
         conn.close()
 
@@ -1548,7 +1641,7 @@ async def _stream_analytics(
         return
 
     if emitter:
-        await emitter({"type": "status", "data": {"description": "Selecting table from registry...", "done": False}})
+        await emitter({"type": "status", "data": {"description": "Selecting tables from registry...", "done": False}})
 
     candidates: list[dict] = []
     try:
@@ -1558,13 +1651,11 @@ async def _stream_analytics(
             for candidate in candidates
             if candidate.get("match_type") in {"exact_table_name", "exact_alias"}
         ]
-        if len(exact_candidates) == 1:
+        if len(exact_candidates) == 1 and not _needs_dimension_lookup(question):
             supervisor = _supervisor_from_exact_candidate(exact_candidates[0])
         else:
-            prompt_candidates = exact_candidates or candidates
-            prompt_registry = _candidate_registry(registry, prompt_candidates) if prompt_candidates else registry
             supervisor = await asyncio.to_thread(
-                _run_supervisor, question, prompt_registry, litellm_url, litellm_model, api_key,
+                _run_supervisor, question, registry, litellm_url, litellm_model, api_key,
             )
     except Exception as e:
         yield f"> **Error:** Table selection failed — {e}\n"
@@ -1572,7 +1663,10 @@ async def _stream_analytics(
             await emitter({"type": "status", "data": {"description": "Done", "done": True}})
         return
 
-    table = supervisor["table"]
+    tables = supervisor["tables"]
+    join_hint = supervisor.get("join_hint")
+    table = tables[0] if tables else ""
+    table_text = ", ".join(f"`{table_name}`" for table_name in tables) if tables else "`unknown`"
     confidence = supervisor["confidence"]
     reasoning = supervisor["reasoning"]
 
@@ -1581,8 +1675,13 @@ async def _stream_analytics(
 
     yield f"> **Table:** `{table}` — {reasoning} (confidence: {confidence})\n"
 
+    yield f"> **Tables:** {table_text}\n"
+    if join_hint:
+        yield f"> **Join Hint:** `{join_hint}`\n"
+
     if confidence == "low":
-        suggestions = [c["table"] for c in candidates[:3] if c.get("table") and c["table"] != table]
+        selected = set(tables)
+        suggestions = [c["table"] for c in candidates[:3] if c.get("table") and c["table"] not in selected]
         if suggestions:
             bullets = "\n".join(f"> - `{name}`" for name in suggestions)
             yield (
@@ -1600,7 +1699,7 @@ async def _stream_analytics(
         t0 = time.time()
         query_result = await asyncio.to_thread(
             _run_query,
-            question, table, registry, s3_bucket, aws_region,
+            question, tables, join_hint, registry, s3_bucket, aws_region,
             litellm_url, litellm_model, api_key,
         )
         elapsed = time.time() - t0

@@ -12,7 +12,7 @@ public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
 private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
 
 # EKS Configuration
-cluster_name = "llmops-platform-eks"
+cluster_name = "llmops-cluster"
 
 # NAT Gateway Configuration
 # Set to true for single NAT (cost saving, non-prod)

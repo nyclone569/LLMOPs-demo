@@ -47,6 +47,14 @@ provider "helm" {
   }
 }
 
+# kubectl provider — applies raw YAML without plan-time CRD schema validation
+provider "kubectl" {
+  host                   = data.terraform_remote_state.eks.outputs.cluster_endpoint
+  cluster_ca_certificate = base64decode(data.terraform_remote_state.eks.outputs.cluster_certificate_authority_data)
+  token                  = data.aws_eks_cluster_auth.cluster.token
+  load_config_file       = false
+}
+
 # Create namespaces
 resource "kubernetes_namespace" "external_secrets" {
   metadata {

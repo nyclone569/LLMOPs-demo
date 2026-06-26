@@ -82,11 +82,6 @@ resource "helm_release" "argocd" {
     value = "HTTP"
   }
 
-  set {
-    name  = "server.ingress.annotations.alb\\.ingress\\.kubernetes\\.io/listen-ports"
-    value = "[{\"HTTP\":80}]"
-  }
-
   # No hostname restriction — accept all requests to the ALB DNS name
   # set {
   #   name  = "server.ingress.hosts[0]"

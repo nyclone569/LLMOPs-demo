@@ -219,7 +219,7 @@ def test_run_supervisor_can_receive_candidate_registry_only():
 
     def fake_llm(messages, model, litellm_url, api_key=""):
         captured_messages["user"] = messages[1]["content"]
-        return '{"table": "kpi_zone_net_flow", "confidence": "high", "reasoning": "best candidate"}'
+        return '{"tables": ["kpi_zone_net_flow"], "join_hint": null, "confidence": "high", "reasoning": "best candidate"}'
 
     with patch("filter_analytics._llm_chat", side_effect=fake_llm):
         result = _run_supervisor(
@@ -230,7 +230,7 @@ def test_run_supervisor_can_receive_candidate_registry_only():
             "",
         )
 
-    assert result["table"] == "kpi_zone_net_flow"
+    assert result["tables"] == ["kpi_zone_net_flow"]
     assert "kpi_zone_net_flow" in captured_messages["user"]
     assert "Available tables:" in captured_messages["user"]
 
@@ -260,7 +260,7 @@ def test_run_supervisor_unknown_table_returns_low_confidence():
         )
 
     assert result["confidence"] == "low"
-    assert result["table"] == ""
+    assert result["tables"] == []
     assert "not listed" in result["reasoning"]
 
 
@@ -450,7 +450,7 @@ def test_build_duckdb_conn_installs_httpfs_creates_secret_and_view():
 
     with patch("filter_analytics.duckdb.connect", return_value=fake_conn) as mock_connect, \
          patch("filter_analytics._create_s3_secret", return_value="web_identity") as mock_secret:
-        conn = _build_duckdb_conn("route_top_pickup_zones", "analytics-bucket", "ap-southeast-1")
+        conn = _build_duckdb_conn(["route_top_pickup_zones"], "analytics-bucket", "ap-southeast-1")
 
     assert conn is fake_conn
     mock_connect.assert_called_once_with(
@@ -463,6 +463,24 @@ def test_build_duckdb_conn_installs_httpfs_creates_secret_and_view():
     executed_sql = [call.args[0] for call in fake_conn.execute.call_args_list]
     assert executed_sql[0] == "INSTALL httpfs; LOAD httpfs;"
     assert executed_sql[1] == "CREATE VIEW route_top_pickup_zones AS SELECT * FROM read_parquet('s3://analytics-bucket/route_top_pickup_zones/*.parquet')"
+
+
+def test_build_duckdb_conn_creates_views_for_all_selected_tables():
+    from filter_analytics import _build_duckdb_conn
+
+    fake_conn = MagicMock()
+
+    with patch("filter_analytics.duckdb.connect", return_value=fake_conn), \
+         patch("filter_analytics._create_s3_secret", return_value="web_identity"):
+        _build_duckdb_conn(
+            ["kpi_zone_performance", "dim_zone_grouped"],
+            "analytics-bucket",
+            "ap-southeast-1",
+        )
+
+    executed_sql = [call.args[0] for call in fake_conn.execute.call_args_list]
+    assert executed_sql[1] == "CREATE VIEW kpi_zone_performance AS SELECT * FROM read_parquet('s3://analytics-bucket/kpi_zone_performance/*.parquet')"
+    assert executed_sql[2] == "CREATE VIEW dim_zone_grouped AS SELECT * FROM read_parquet('s3://analytics-bucket/dim_zone_grouped/*.parquet')"
 
 
 def test_run_query_retries_on_duckdb_binder_error():
@@ -487,7 +505,8 @@ def test_run_query_retries_on_duckdb_binder_error():
         mock_build.return_value = MagicMock()
         result = _run_query(
             "List the top 20 pickup zones by total taxi revenue following pickup borough",
-            "route_top_pickup_zones",
+            ["route_top_pickup_zones"],
+            None,
             _query_registry(),
             "analytics-bucket",
             "ap-southeast-1",
@@ -514,7 +533,7 @@ def test_run_query_retries_on_catalog_error():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", side_effect=[duckdb.CatalogException("Column missing_column not found"), rows]):
         mock_build.return_value = MagicMock()
-        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        result = _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert mock_llm.call_count == 2
     assert result["rows"] == rows
@@ -536,7 +555,7 @@ def test_run_query_raises_after_two_duckdb_failures():
          ]):
         mock_build.return_value = MagicMock()
         with pytest.raises(QueryGenerationError) as exc_info:
-            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+            _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert isinstance(exc_info.value.original, duckdb.Error)
     assert "second binder failure" in str(exc_info.value.original)
@@ -556,7 +575,7 @@ def test_run_query_validator_then_duckdb_error_in_one_session():
          patch("filter_analytics._execute_sql", side_effect=duckdb.BinderException("binder after validation")) as mock_execute:
         mock_build.return_value = MagicMock()
         with pytest.raises(QueryGenerationError) as exc_info:
-            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+            _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert isinstance(exc_info.value.original, duckdb.Error)
     assert "binder after validation" in str(exc_info.value.original)
@@ -576,7 +595,7 @@ def test_run_query_error_carries_last_plan_sql_and_raw():
          patch("filter_analytics._execute_sql") as mock_execute:
         mock_build.return_value = MagicMock()
         with pytest.raises(QueryGenerationError) as exc_info:
-            _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+            _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     err = exc_info.value
     assert isinstance(err.original, SQLValidationError)
@@ -595,7 +614,7 @@ def test_run_query_extracts_plan_and_sql():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", return_value=rows):
         mock_build.return_value = MagicMock()
-        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        result = _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert result["plan"] == "Use zone grain."
     assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
@@ -610,7 +629,7 @@ def test_run_query_handles_missing_plan_delimiter():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", return_value=rows):
         mock_build.return_value = MagicMock()
-        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        result = _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert result["plan"] == ""
     assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
@@ -625,7 +644,7 @@ def test_run_query_strips_fences_around_full_plan_and_sql():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", return_value=rows):
         mock_build.return_value = MagicMock()
-        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        result = _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert result["plan"] == "Use zone grain."
     assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
@@ -644,7 +663,7 @@ def test_run_query_ignores_sql_colon_inside_plan_text():
          patch("filter_analytics._build_duckdb_conn") as mock_build, \
          patch("filter_analytics._execute_sql", return_value=rows):
         mock_build.return_value = MagicMock()
-        result = _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        result = _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     assert result["plan"] == "I will write SQL: a SELECT that keeps pickup-zone grain."
     assert result["sql"] == "SELECT pickup_zone, revenue FROM route_top_pickup_zones"
@@ -664,7 +683,7 @@ def test_run_query_retry_message_includes_error_verbatim():
              [{"pickup_zone": "Midtown", "pickup_borough": "Manhattan", "revenue": 100.0}],
          ]):
         mock_build.return_value = MagicMock()
-        _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     second_messages = mock_llm.call_args_list[1].args[0]
     assert second_messages[-2]["role"] == "assistant"
@@ -688,45 +707,81 @@ def test_run_query_reuses_connection_across_attempts():
              duckdb.BinderException("first failure"),
              [{"pickup_zone": "Midtown", "revenue": 100.0}],
          ]):
-        _run_query("top zones", "route_top_pickup_zones", _query_registry(), "analytics-bucket", "ap-southeast-1")
+        _run_query("top zones", ["route_top_pickup_zones"], None, _query_registry(), "analytics-bucket", "ap-southeast-1")
 
     mock_connect.assert_called_once()
     fake_conn.close.assert_called_once()
 
 
 def test_validate_sql_passes_valid_select():
-    _validate_sql("SELECT trip_count FROM kpi_monthly_summary", "kpi_monthly_summary", {"kpi_monthly_summary"})
+    _validate_sql("SELECT trip_count FROM kpi_monthly_summary", "kpi_monthly_summary", {"kpi_monthly_summary"}, {"kpi_monthly_summary"})
 
 
 def test_validate_sql_rejects_ddl():
     with pytest.raises(SQLValidationError, match="DDL"):
-        _validate_sql("SELECT 1; DROP TABLE kpi_monthly_summary", "kpi_monthly_summary", {"kpi_monthly_summary"})
+        _validate_sql("SELECT 1; DROP TABLE kpi_monthly_summary", "kpi_monthly_summary", {"kpi_monthly_summary"}, {"kpi_monthly_summary"})
+
+
+def test_validate_sql_rejects_trailing_semicolon():
+    with pytest.raises(SQLValidationError, match="chained statements"):
+        _validate_sql(
+            "SELECT trip_count FROM kpi_monthly_summary;",
+            "kpi_monthly_summary",
+            {"kpi_monthly_summary"},
+            {"kpi_monthly_summary"},
+        )
 
 
 def test_validate_sql_rejects_file_functions():
     with pytest.raises(SQLValidationError, match="file function"):
-        _validate_sql("SELECT * FROM read_parquet('s3://...')", "kpi_monthly_summary", {"kpi_monthly_summary"})
+        _validate_sql("SELECT * FROM read_parquet('s3://...')", "kpi_monthly_summary", {"kpi_monthly_summary"}, {"kpi_monthly_summary"})
 
 
 def test_validate_sql_rejects_wrong_table():
     with pytest.raises(SQLValidationError, match="not allowed"):
-        _validate_sql("SELECT * FROM some_other_table", "kpi_monthly_summary", {"kpi_monthly_summary"})
+        _validate_sql("SELECT * FROM some_other_table", "kpi_monthly_summary", {"kpi_monthly_summary"}, {"kpi_monthly_summary"})
+
+
+def test_validate_sql_allows_join_to_selected_registry_table():
+    _validate_sql(
+        "SELECT d.group_name, SUM(t.pickups) AS pickups "
+        "FROM kpi_zone_performance t "
+        "JOIN dim_zone_grouped d ON t.location_id = d.location_id "
+        "GROUP BY 1",
+        "kpi_zone_performance",
+        {"kpi_zone_performance", "dim_zone_grouped"},
+        {"kpi_zone_performance", "dim_zone_grouped"},
+    )
+
+
+def test_validate_sql_rejects_join_to_unselected_registry_table():
+    with pytest.raises(SQLValidationError, match="not allowed"):
+        _validate_sql(
+            "SELECT d.group_name, SUM(t.pickups) AS pickups "
+            "FROM kpi_zone_performance t "
+            "JOIN dim_zone_grouped d ON t.location_id = d.location_id "
+            "GROUP BY 1",
+            "kpi_zone_performance",
+            {"kpi_zone_performance", "dim_zone_grouped"},
+            {"kpi_zone_performance"},
+        )
 
 
 def test_validate_sql_rejects_non_select():
     with pytest.raises(SQLValidationError, match="SELECT"):
-        _validate_sql("INSERT INTO foo VALUES (1)", "kpi_monthly_summary", {"kpi_monthly_summary"})
+        _validate_sql("INSERT INTO foo VALUES (1)", "kpi_monthly_summary", {"kpi_monthly_summary"}, {"kpi_monthly_summary"})
 
 
 def test_validate_sql_rejects_unknown_expected_table():
     with pytest.raises(SQLValidationError, match="not in registry"):
-        _validate_sql("SELECT 1 FROM bad_table", "bad_table", {"kpi_monthly_summary"})
+        _validate_sql("SELECT 1 FROM bad_table", "bad_table", {"kpi_monthly_summary"}, {"bad_table"})
 
 
 def test_validate_sql_allows_cte():
     _validate_sql(
         "WITH cte AS (SELECT trip_count FROM kpi_monthly_summary) SELECT * FROM cte",
         "kpi_monthly_summary",
+        {"kpi_monthly_summary"},
         {"kpi_monthly_summary"},
     )
 
@@ -1106,7 +1161,7 @@ async def test_stream_analytics_exact_alias_does_not_return_low_confidence_messa
 
 
 @pytest.mark.asyncio
-async def test_stream_analytics_multiple_exact_matches_uses_candidate_supervisor():
+async def test_stream_analytics_multiple_exact_matches_uses_full_registry_supervisor():
     from filter_analytics import _stream_analytics
 
     registry = {
@@ -1141,7 +1196,8 @@ async def test_stream_analytics_multiple_exact_matches_uses_candidate_supervisor
     def fake_supervisor(question, prompt_registry, litellm_url, litellm_model, api_key):
         captured_registry.update(prompt_registry)
         return {
-            "table": "kpi_zone_performance",
+            "tables": ["kpi_zone_performance"],
+            "join_hint": None,
             "confidence": "high",
             "reasoning": "multiple exact matches required supervisor choice",
         }
@@ -1171,8 +1227,11 @@ async def test_stream_analytics_multiple_exact_matches_uses_candidate_supervisor
             chunks.append(chunk)
 
     mock_supervisor.assert_called_once()
-    assert set(captured_registry) == {"kpi_zone_net_flow", "kpi_zone_performance"}
-    assert "kpi_monthly_summary" not in captured_registry
+    assert set(captured_registry) == {
+        "kpi_zone_net_flow",
+        "kpi_zone_performance",
+        "kpi_monthly_summary",
+    }
     assert "**Table:** `kpi_zone_performance`" in "".join(chunks)
 
 
@@ -1228,6 +1287,65 @@ async def test_stream_analytics_exact_table_match_skips_supervisor_llm():
 
 
 @pytest.mark.asyncio
+async def test_stream_analytics_exact_table_with_dimension_lookup_uses_supervisor():
+    from filter_analytics import _stream_analytics
+
+    registry = {
+        "kpi_zone_performance": {
+            "description": "Zone performance by location",
+            "tier": "kpi",
+            "columns": [{"name": "location_id", "type": "int32"}, {"name": "pickups", "type": "int64"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+        "dim_zone_grouped": {
+            "description": "Zone group labels",
+            "tier": "dim",
+            "columns": [{"name": "location_id", "type": "int32"}, {"name": "group_name", "type": "string"}],
+            "aliases": [],
+            "example_questions": [],
+        },
+    }
+
+    async def fake_summary(*args, **kwargs):
+        yield "Zone groups are ranked."
+
+    with patch("filter_analytics._load_registry", return_value=registry), \
+         patch("filter_analytics._run_supervisor", return_value={
+             "tables": ["kpi_zone_performance", "dim_zone_grouped"],
+             "join_hint": "JOIN dim_zone_grouped d ON t.location_id = d.location_id",
+             "confidence": "high",
+             "reasoning": "zone group label lookup",
+         }) as mock_supervisor, \
+         patch("filter_analytics._run_query", return_value={
+             "sql": "SELECT d.group_name, SUM(t.pickups) AS pickups FROM kpi_zone_performance t JOIN dim_zone_grouped d ON t.location_id = d.location_id GROUP BY 1",
+             "rows": [{"group_name": "Airport", "pickups": 10}],
+             "capped": False,
+         }) as mock_query, \
+         patch("filter_analytics._run_chart_spec", return_value=None), \
+         patch("filter_analytics._stream_summary", side_effect=fake_summary):
+        chunks = []
+        async for chunk in _stream_analytics(
+            "Show kpi zone performance by zone group name",
+            "bucket",
+            "ap-southeast-1",
+            "http://litellm",
+            "private-chat",
+            "",
+            300,
+            30,
+            200,
+            None,
+        ):
+            chunks.append(chunk)
+
+    mock_supervisor.assert_called_once()
+    mock_query.assert_called_once()
+    assert mock_query.call_args.args[1] == ["kpi_zone_performance", "dim_zone_grouped"]
+    assert "dim_zone_grouped" in "".join(chunks)
+
+
+@pytest.mark.asyncio
 async def test_stream_analytics_yields_plan_block_between_table_and_sql():
     rows = [{"pickup_zone": "Midtown", "revenue": 100.0}]
     registry = {"route_top_pickup_zones": {"tier": "route", "columns": [{"name": "pickup_zone", "type": "string"}, {"name": "revenue", "type": "double"}], "example_questions": [], "description": "Top zones"}}
@@ -1236,7 +1354,7 @@ async def test_stream_analytics_yields_plan_block_between_table_and_sql():
         yield "Midtown leads revenue."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "route_top_pickup_zones", "confidence": "high", "reasoning": "Top zones match"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["route_top_pickup_zones"], "join_hint": None, "confidence": "high", "reasoning": "Top zones match"}), \
          patch("filter_analytics._run_query", return_value={
              "plan": "Use route_top_pickup_zones at pickup-zone grain.",
              "sql": "SELECT pickup_zone, revenue FROM route_top_pickup_zones",
@@ -1263,7 +1381,7 @@ async def test_stream_analytics_omits_plan_block_when_empty_or_missing():
         yield "Midtown leads revenue."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "route_top_pickup_zones", "confidence": "high", "reasoning": "Top zones match"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["route_top_pickup_zones"], "join_hint": None, "confidence": "high", "reasoning": "Top zones match"}), \
          patch("filter_analytics._run_query", return_value={
              "sql": "SELECT pickup_zone, revenue FROM route_top_pickup_zones",
              "rows": rows,
@@ -1326,7 +1444,8 @@ async def test_stream_analytics_pickup_borough_regression():
 
     with patch("filter_analytics._load_registry", return_value=registry), \
          patch("filter_analytics._run_supervisor", return_value={
-             "table": "route_top_pickup_zones",
+             "tables": ["route_top_pickup_zones"],
+             "join_hint": None,
              "confidence": "high",
              "reasoning": "pickup zone leaderboard",
          }), \
@@ -1395,7 +1514,8 @@ async def test_stream_analytics_renders_last_sql_and_plan_on_query_generation_er
 
     with patch("filter_analytics._load_registry", return_value=registry), \
          patch("filter_analytics._run_supervisor", return_value={
-             "table": "route_top_pickup_zones",
+             "tables": ["route_top_pickup_zones"],
+             "join_hint": None,
              "confidence": "high",
              "reasoning": "pickup zone leaderboard",
          }), \
@@ -1441,7 +1561,7 @@ async def test_stream_analytics_yields_reasoning_trace_and_summary():
         yield "grew."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Monthly revenue question"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
          patch("filter_analytics._run_chart_spec", return_value={"type": "line", "x": "pickup_month", "y": "total_revenue"}), \
          patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
@@ -1479,7 +1599,7 @@ async def test_stream_analytics_table_prompt_emits_table_artifact_after_summary(
         summary_complete = True
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Monthly revenue question"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
          patch("filter_analytics._run_chart_spec") as mock_chart_spec, \
          patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
@@ -1511,7 +1631,7 @@ async def test_stream_analytics_both_prompt_emits_chart_and_table_artifacts():
         yield "Revenue summary."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_borough_comparison", "confidence": "high", "reasoning": "Borough revenue question"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_borough_comparison"], "join_hint": None, "confidence": "high", "reasoning": "Borough revenue question"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT borough, total_revenue FROM kpi_borough_comparison", "rows": rows, "capped": True}), \
          patch("filter_analytics._run_chart_spec", return_value={"type": "bar", "x": "borough", "y": "total_revenue"}), \
          patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \
@@ -1542,7 +1662,7 @@ async def test_stream_analytics_auto_table_chart_spec_emits_table_artifact():
         yield "Revenue summary."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Monthly revenue question"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
          patch("filter_analytics._run_chart_spec", return_value={"type": "table", "x": "month", "y": "total_revenue"}), \
          patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
@@ -1572,7 +1692,7 @@ async def test_stream_analytics_chart_prompt_falls_back_to_table_without_chart_s
         yield "Revenue summary."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue question"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Monthly revenue question"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
          patch("filter_analytics._run_chart_spec", return_value=None), \
          patch("filter_analytics.build_table_artifact", return_value="<html>table</html>"), \
@@ -1597,7 +1717,7 @@ async def test_stream_analytics_yields_clarification_on_low_confidence():
         emitted.append(event)
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "low", "reasoning": "Unclear question"}):
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "low", "reasoning": "Unclear question"}):
 
         chunks = []
         async for chunk in _stream_analytics("something vague", "bucket", "ap-southeast-1", "http://litellm:4000/v1/chat/completions", "private-chat", "", 300, 30, 200, mock_emitter):
@@ -1617,7 +1737,7 @@ async def test_stream_analytics_yields_error_on_query_failure():
         emitted.append(event)
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Good match"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Good match"}), \
          patch("filter_analytics._run_query", side_effect=TimeoutError("DuckDB query exceeded 30s")):
 
         chunks = []
@@ -1662,7 +1782,7 @@ async def test_full_pipe_integration_streams_trace_and_summary():
         yield "from $10M to $20M."
 
     with patch("filter_analytics._load_registry", return_value=registry), \
-         patch("filter_analytics._run_supervisor", return_value={"table": "kpi_monthly_summary", "confidence": "high", "reasoning": "Monthly revenue match"}), \
+         patch("filter_analytics._run_supervisor", return_value={"tables": ["kpi_monthly_summary"], "join_hint": None, "confidence": "high", "reasoning": "Monthly revenue match"}), \
          patch("filter_analytics._run_query", return_value={"sql": "SELECT pickup_month, total_revenue FROM kpi_monthly_summary", "rows": rows, "capped": False}), \
          patch("filter_analytics._run_chart_spec", return_value={"type": "line", "x": "pickup_month", "y": "total_revenue"}), \
          patch("filter_analytics.build_html_artifact", return_value="<html>chart</html>"), \

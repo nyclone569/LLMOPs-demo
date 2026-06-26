@@ -83,37 +83,23 @@ resource "helm_release" "external_secrets" {
   ]
 }
 
-# Use null_resource + kubectl to avoid CRD pre-validation at plan time
-resource "null_resource" "cluster_secret_store_aws" {
-  triggers = {
-    chart_version = helm_release.external_secrets.version
-    region        = var.aws_region
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOF
-      aws eks update-kubeconfig --region ${var.aws_region} --name ${local.cluster_name}
-      until kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1; do
-        echo "Waiting for ClusterSecretStore CRD..."; sleep 5
-      done
-      kubectl apply -f - <<YAML
-apiVersion: external-secrets.io/v1beta1
-kind: ClusterSecretStore
-metadata:
-  name: aws-secrets-manager
-spec:
-  provider:
-    aws:
-      service: SecretsManager
-      region: ${var.aws_region}
-      auth:
-        jwt:
-          serviceAccountRef:
-            name: external-secrets
-            namespace: ${kubernetes_namespace.external_secrets.metadata[0].name}
-YAML
-    EOF
-  }
+resource "kubectl_manifest" "cluster_secret_store_aws" {
+  yaml_body = <<-YAML
+    apiVersion: external-secrets.io/v1beta1
+    kind: ClusterSecretStore
+    metadata:
+      name: aws-secrets-manager
+    spec:
+      provider:
+        aws:
+          service: SecretsManager
+          region: ${var.aws_region}
+          auth:
+            jwt:
+              serviceAccountRef:
+                name: external-secrets
+                namespace: ${kubernetes_namespace.external_secrets.metadata[0].name}
+  YAML
 
   depends_on = [helm_release.external_secrets]
 }
