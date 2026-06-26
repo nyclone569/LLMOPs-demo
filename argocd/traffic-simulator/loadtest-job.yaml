@@ -38,17 +38,17 @@ spec:
                   key: LITELLM_MASTER_KEY
                   optional: false
             - name: TOTAL_USERS
-              value: "290"
-            - name: TARGET_RPM
-              value: "20"
-            - name: CONCURRENCY
-              value: "10"
-            - name: RUN_DURATION_S
               value: "300"
+            - name: TARGET_RPM
+              value: "100"
+            - name: CONCURRENCY
+              value: "25"
+            - name: RUN_DURATION_S
+              value: "600"
             - name: RAMP_UP_S
-              value: "60"
+              value: "0"
             - name: MODEL_MIX
-              value: "gpt-4o-mini=1"
+              value: "gpt-4o-mini"
             - name: EXPENSIVE_MODEL
               value: "gpt-4o-mini"
             - name: LONG_CONTEXT_RATE
@@ -56,7 +56,7 @@ spec:
             - name: DUPLICATE_RATE
               value: "0.02"
             - name: PROVIDER_FAIL_RATE
-              value: "0.03"
+              value: "0.02"
             - name: EXPENSIVE_RATE
               value: "0.15"
             - name: SENSITIVE_RATE

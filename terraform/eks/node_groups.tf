@@ -105,6 +105,62 @@ resource "aws_eks_node_group" "workload" {
   }
 }
 
+# GPU Node Group - For Ollama LLM inference
+  resource "aws_eks_node_group" "gpu" {
+    cluster_name    = module.eks.cluster_name
+    node_group_name = "${var.cluster_name}-gpu"
+    node_role_arn   = aws_iam_role.node_group.arn
+    subnet_ids      = data.terraform_remote_state.vpc.outputs.private_subnet_ids
+
+    scaling_config {
+      desired_size = 1
+      min_size     = 0
+      max_size     = 1
+    }
+
+    update_config {
+      max_unavailable = 1
+    }
+
+    instance_types = ["g4dn.xlarge"]   # 1x T4 GPU, 16GB VRAM — enough for 7B models
+    ami_type       = "AL2023_x86_64_NVIDIA"
+    capacity_type  = "ON_DEMAND"
+
+    labels = {
+      role        = "gpu"
+      environment = var.environment
+      nodegroup   = "gpu"
+    }
+
+    taint {
+      key    = "nvidia.com/gpu"
+      value  = "true"
+      effect = "NO_SCHEDULE"
+    }
+  
+    tags = merge(
+      {
+        Name = "${var.cluster_name}-gpu-node-group"
+        Role = "gpu"
+      },
+      var.enable_cluster_autoscaler ? {
+        "k8s.io/cluster-autoscaler/${var.cluster_name}" = "owned"
+        "k8s.io/cluster-autoscaler/enabled"             = "true"
+      } : {}
+    )
+  
+    depends_on = [
+      aws_iam_role_policy_attachment.node_group_AmazonEKSWorkerNodePolicy,
+      aws_iam_role_policy_attachment.node_group_AmazonEKS_CNI_Policy,
+      aws_iam_role_policy_attachment.node_group_AmazonEC2ContainerRegistryReadOnly,
+    ]
+
+    lifecycle {
+      create_before_destroy = true
+      ignore_changes        = [scaling_config[0].desired_size]
+    }
+  }
+
 # IAM Role for Node Groups
 resource "aws_iam_role" "node_group" {
   name = "${var.cluster_name}-node-group-role"

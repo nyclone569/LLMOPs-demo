@@ -12,16 +12,91 @@ data:
       - orgId: 1
         name: llmops-security
         folder: LLMOps
-        interval: 5m
+        interval: 2m
         rules:
-          - uid: llmops-sensitive-prompt
-            title: SensitivePromptDetected
+
+          # ── Rule 1: Sensitive keyword ─────────────────────────────────────
+          # Catches password/secret/token/key by keyword — broad but fast.
+          - uid: llmops-sensitive-keyword
+            title: SensitiveKeywordDetected
             condition: C
             data:
               - refId: A
                 datasourceUid: P8E80F9AEF21F6940
                 model:
-                  expr: 'count_over_time({namespace="litellm"} |~ "(?i)(password|secret|api.?key|token|credential|ssn|credit.?card)" [5m])'
+                  expr: 'count_over_time({namespace="litellm"} |~ "(?i)(password|passwd|secret|api[_\\-.]?key|access[_\\-.]?key|auth[_\\-.]?key|private[_\\-.]?key|bearer|authorization|credential|ssn|social.?security|credit.?card)" [5m])'
+              - refId: C
+                datasourceUid: "__expr__"
+                model:
+                  conditions:
+                    - evaluator:
+                        params: [0]
+                        type: gt
+                      query:
+                        params: [A]
+                      reducer:
+                        type: sum
+                  type: classic_conditions
+            noDataState: OK
+            execErrState: OK
+            for: 1m
+            labels:
+              severity: warning
+              component: security
+              category: keyword
+            annotations:
+              summary: Sensitive keyword detected in LiteLLM prompts
+              description: Prompt log matched password/secret/token/credential keyword in last 5 minutes.
+
+          # ── Rule 2: Formatted API key patterns ────────────────────────────
+          # Matches known vendor key formats — high precision, critical severity.
+          # Covers: AWS (AKIA), OpenAI (sk-), Anthropic (sk-ant-),
+          #         GitHub (ghp_/gho_/ghs_/ghr_), Stripe (sk_live_/pk_live_),
+          #         Slack (xoxb-/xoxp-/xoxa-/xoxs-).
+          - uid: llmops-api-key-pattern
+            title: APIKeyPatternDetected
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: P8E80F9AEF21F6940
+                model:
+                  expr: 'count_over_time({namespace="litellm"} |~ "(AKIA[A-Z0-9]{16}|sk-[a-zA-Z0-9]{20,}|sk-ant-[a-zA-Z0-9_\\-]{20,}|gh[posr]_[a-zA-Z0-9]{36,}|(sk|pk)_(live|test)_[a-zA-Z0-9]{24,}|xox[bpoas]-[a-zA-Z0-9\\-]{10,})" [5m])'
+              - refId: C
+                datasourceUid: "__expr__"
+                model:
+                  conditions:
+                    - evaluator:
+                        params: [0]
+                        type: gt
+                      query:
+                        params: [A]
+                      reducer:
+                        type: sum
+                  type: classic_conditions
+            noDataState: OK
+            execErrState: OK
+            for: 1m
+            labels:
+              severity: critical
+              component: security
+              category: api-key
+            annotations:
+              summary: API key pattern detected in LiteLLM prompts
+              description: Prompt log matched a vendor API key format (AWS/OpenAI/Anthropic/GitHub/Stripe/Slack) in last 5 minutes.
+
+          # ── Rule 3: PII — email, SSN, credit card numbers ─────────────────
+          # Email: standard RFC 5321 local@domain pattern.
+          # SSN:   XXX-XX-XXXX digit format.
+          # CC:    Visa (4xxx), Mastercard (5[1-5]xxx), Amex (34/37xxx),
+          #        Discover (6011xxx) digit sequences.
+          - uid: llmops-pii-detected
+            title: PIIDetected
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: P8E80F9AEF21F6940
+                model:
+                  expr: 'count_over_time({namespace="litellm"} |~ "([a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}|[0-9]{3}-[0-9]{2}-[0-9]{4}|4[0-9]{12}([0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6011[0-9]{12})" [5m])'
               - refId: C
                 datasourceUid: "__expr__"
                 model:
@@ -40,6 +115,42 @@ data:
             labels:
               severity: warning
               component: security
+              category: pii
             annotations:
-              summary: Sensitive content detected in LiteLLM logs
-              description: Log lines matched sensitive pattern in last 5 minutes.
+              summary: PII detected in LiteLLM prompts
+              description: Prompt log matched an email address, SSN, or credit card number pattern in last 5 minutes.
+
+          # ── Rule 4: Credential leak — private keys, DB URLs, JWT ──────────
+          # -----BEGIN: PEM private/certificate key block headers.
+          # DB URL:     scheme://user:pass@host  (postgres/mysql/mongodb/redis).
+          # JWT:        eyJ<header>.<payload>.<sig>  — base64url three-part token.
+          - uid: llmops-credential-leak
+            title: CredentialLeakDetected
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: P8E80F9AEF21F6940
+                model:
+                  expr: 'count_over_time({namespace="litellm"} |~ "(-----BEGIN|[a-zA-Z][a-zA-Z0-9+.\\-]+://[^:\\s]+:[^@\\s]+@|eyJ[a-zA-Z0-9_\\-]{10,}\\.[a-zA-Z0-9_\\-]+\\.[a-zA-Z0-9_\\-]+)" [5m])'
+              - refId: C
+                datasourceUid: "__expr__"
+                model:
+                  conditions:
+                    - evaluator:
+                        params: [0]
+                        type: gt
+                      query:
+                        params: [A]
+                      reducer:
+                        type: sum
+                  type: classic_conditions
+            noDataState: OK
+            execErrState: OK
+            for: 1m
+            labels:
+              severity: critical
+              component: security
+              category: credential
+            annotations:
+              summary: Credential or private key detected in LiteLLM prompts
+              description: Prompt log matched a PEM key block, database connection string with embedded password, or JWT token in last 5 minutes.

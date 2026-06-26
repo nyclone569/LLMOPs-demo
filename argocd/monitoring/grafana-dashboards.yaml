@@ -911,3 +911,239 @@ data:
         }
       ]
     }
+
+  llmops-alertmanager.json: |
+    {
+      "id": null,
+      "uid": "llmops-alertmanager",
+      "title": "LLMOps Alertmanager Overview",
+      "tags": ["llmops", "alerting"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Firing Alerts",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Pending Alerts",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"pending\"}) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1}
+                ]
+              }
+            }
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 3,
+          "title": "Alert Rules Total",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "count(ALERTS) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "short"}
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "none",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 4,
+          "title": "Last Alert Fired",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "targets": [
+            {
+              "expr": "max(timestamp(ALERTS{alertstate=\"firing\"})) * 1000 or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "dateTimeAsLocal"}
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"]},
+            "colorMode": "none",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Active Firing Alerts",
+          "description": "All alert rules currently in firing state",
+          "type": "alertlist",
+          "gridPos": {"h": 14, "w": 24, "x": 0, "y": 4},
+          "options": {
+            "alertName": "",
+            "alertInstanceLabelFilter": "",
+            "dashboardAlerts": false,
+            "groupBy": [],
+            "groupMode": "default",
+            "maxItems": 50,
+            "nameFilter": "",
+            "stateFilter": {
+              "firing": true,
+              "pending": false,
+              "noData": false,
+              "normal": false,
+              "error": true
+            },
+            "sortOrder": 1,
+            "viewMode": "list"
+          }
+        },
+        {
+          "id": 6,
+          "title": "Firing Alert Details (Prometheus)",
+          "description": "Raw ALERTS metric — shows alertname, severity, and all labels for every currently firing rule",
+          "type": "table",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 18},
+          "targets": [
+            {
+              "expr": "ALERTS{alertstate=\"firing\"}",
+              "legendFormat": "",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"custom": {"displayMode": "auto"}},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "alertname"},
+                "properties": [
+                  {"id": "displayName", "value": "Alert Name"},
+                  {"id": "custom.width", "value": 220}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "severity"},
+                "properties": [
+                  {"id": "displayName", "value": "Severity"},
+                  {"id": "custom.width", "value": 100},
+                  {"id": "custom.displayMode", "value": "color-background"},
+                  {"id": "thresholds", "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "yellow", "value": null},
+                      {"color": "red", "value": null}
+                    ]
+                  }}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "component"},
+                "properties": [{"id": "custom.width", "value": 140}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Value"},
+                "properties": [{"id": "custom.hidden", "value": true}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "alertstate"},
+                "properties": [{"id": "custom.hidden", "value": true}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "__name__"},
+                "properties": [{"id": "custom.hidden", "value": true}]
+              }
+            ]
+          },
+          "options": {
+            "sortBy": [{"displayName": "Alert Name", "desc": false}]
+          },
+          "transformations": [
+            {"id": "labelsToFields", "options": {}},
+            {"id": "organize", "options": {}}
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Alert Firing History",
+          "description": "Timeline of alerts entering firing state over the selected time range",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+              "legendFormat": "Firing"
+            },
+            {
+              "expr": "count(ALERTS{alertstate=\"pending\"}) or vector(0)",
+              "legendFormat": "Pending"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"lineWidth": 2, "fillOpacity": 10}
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Firing"},
+                "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Pending"},
+                "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]
+              }
+            ]
+          }
+        }
+      ]
+    }
