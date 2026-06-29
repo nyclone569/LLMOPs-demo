@@ -42,6 +42,8 @@ spec:
       labels:
         app: postgresql-primary
     spec:
+      nodeSelector:
+        role: workload
       securityContext:
         fsGroup: 1001
         runAsUser: 1001
